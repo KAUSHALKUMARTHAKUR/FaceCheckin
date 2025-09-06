@@ -124,43 +124,57 @@ def setup_models():
     os.makedirs('models', exist_ok=True)
     os.makedirs('models/anti-spoofing', exist_ok=True)
     
-    # Updated working URLs - Replace the Google Drive ID with your actual file ID
+    # Model configurations with working URLs
     models_config = {
         'yolov5s-face.onnx': {
-            'url': 'https://github.com/deepcam-cn/yolov5-face/releases/download/v0.0.0/yolov5s-face.onnx',
+            'drive_id': 'YOUR_YOLO_GOOGLE_DRIVE_FILE_ID',  # Upload your YOLO model here
             'path': 'models/yolov5s-face.onnx',
             'required': True
         },
         'AntiSpoofing_bin_1.5_128.onnx': {
-            'drive_id': '1nH5G7dAHFE2KlW_H65txc8GDKSB7Zpy4',  # Replace with your actual file ID
+            'drive_id': '1nH5G7dAHFE2KlW_H65txc8GDKSB7Zpy4',  # Your existing working ID
             'path': 'models/anti-spoofing/AntiSpoofing_bin_1.5_128.onnx',
             'required': True
         }
     }
     
-    # Try alternative YOLOv5 face URLs if the first one fails
-    yolo_urls = [
-        'https://github.com/deepcam-cn/yolov5-face/releases/download/v0.0.0/yolov5s-face.onnx',
-        'https://huggingface.co/arnabdhar/YOLOv5-Face/resolve/main/yolov5s-face.onnx',
-        'https://github.com/ultralytics/yolov5/releases/download/v6.2/yolov5s.onnx'  # fallback
+    # Alternative working URLs for YOLO (try these first)
+    yolo_working_urls = [
+        'https://github.com/deepcam-cn/yolov5-face/releases/download/v6.0/yolov5s-face.onnx',
+        'https://huggingface.co/spaces/mikel-brostrom/yolo_tracking/resolve/main/weights/yolov5s-face.onnx',
+        'https://github.com/deepcam-cn/yolov5-face/raw/master/weights/yolov5s-face.onnx'
     ]
     
-    # Download YOLO model with fallback URLs
+    # Try downloading YOLO from working URLs first
     yolo_downloaded = False
-    for url in yolo_urls:
+    for i, url in enumerate(yolo_working_urls):
+        print(f"Trying YOLO URL {i+1}/{len(yolo_working_urls)}: {url}")
         if download_from_url(url, models_config['yolov5s-face.onnx']['path']):
             yolo_downloaded = True
+            print(f"YOLO model downloaded successfully from URL {i+1}")
             break
     
-    # Download anti-spoofing model from Google Drive
-    antispoof_downloaded = False
-    if models_config['AntiSpoofing_bin_1.5_128.onnx']['drive_id'] != 'YOUR_GOOGLE_DRIVE_FILE_ID':
-        antispoof_downloaded = download_file_from_google_drive(
-            models_config['AntiSpoofing_bin_1.5_128.onnx']['drive_id'],
-            models_config['AntiSpoofing_bin_1.5_128.onnx']['path']
+    # If URL download failed, try Google Drive
+    if not yolo_downloaded and models_config['yolov5s-face.onnx']['drive_id'] != 'YOUR_YOLO_GOOGLE_DRIVE_FILE_ID':
+        print("Trying YOLO download from Google Drive...")
+        yolo_downloaded = download_file_from_google_drive(
+            models_config['yolov5s-face.onnx']['drive_id'],
+            models_config['yolov5s-face.onnx']['path']
         )
     
+    # Download anti-spoofing model from Google Drive (already working)
+    print("Downloading Anti-spoofing model from Google Drive...")
+    antispoof_downloaded = download_file_from_google_drive(
+        models_config['AntiSpoofing_bin_1.5_128.onnx']['drive_id'],
+        models_config['AntiSpoofing_bin_1.5_128.onnx']['path']
+    )
+    
+    # Print status
+    print(f"YOLO Face Model: {'✅ Available' if yolo_downloaded else '❌ Failed'}")
+    print(f"Anti-Spoof Model: {'✅ Available' if antispoof_downloaded else '❌ Failed'}")
+    
     return yolo_downloaded, antispoof_downloaded
+
 
 # Initialize models on startup
 print("Setting up models...")
