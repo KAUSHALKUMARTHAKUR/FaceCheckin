@@ -10,3 +10,5 @@ deepface==0.0.79
 tensorflow==2.13.0
 scikit-learn==1.3.0
 Pillow==10.0.0
+setuptools>=68.0.0,<73.0.0
+wheel>=0.40.0
