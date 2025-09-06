@@ -100,21 +100,26 @@ def setup_models():
     os.makedirs('models', exist_ok=True)
     os.makedirs('models/anti-spoofing', exist_ok=True)
     
-    # Model URLs - Replace these with your actual Google Drive file IDs or direct URLs
+    # Model configuration
     models_config = {
         'yolov5s-face.onnx': {
             'url': 'https://github.com/deepcam-cn/yolov5-face/releases/download/v0.0.0/yolov5s-face.onnx',
             'path': 'models/yolov5s-face.onnx'
         },
         'AntiSpoofing_bin_1.5_128.onnx': {
-            'url': 'https://github.com/your-repo/models/releases/download/v1.0.0/AntiSpoofing_bin_1.5_128.onnx',  # Replace with your URL
+            'drive_id': '1nH5G7dAHFE2KlW_H65txc8GDKSB7Zpy4',  # Replace with your actual file ID
             'path': 'models/anti-spoofing/AntiSpoofing_bin_1.5_128.onnx'
         }
     }
     
     # Download models
     for model_name, config in models_config.items():
-        download_from_url(config['url'], config['path'])
+        if 'url' in config:
+            # Direct URL download
+            download_from_url(config['url'], config['path'])
+        elif 'drive_id' in config:
+            # Google Drive download
+            download_file_from_google_drive(config['drive_id'], config['path'])
 
 # Initialize models on startup
 setup_models()
