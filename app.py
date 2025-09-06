@@ -127,12 +127,12 @@ def setup_models():
     # Model configurations with working URLs
     models_config = {
         'yolov5s-face.onnx': {
-            'drive_id': '1sybYq9GGriXN6sY8YV1-RXMeVqYzhDrV',  # Upload your YOLO model here
+            'drive_id': '1sybYq9GGriXN6sY8YV1-RXMeVqYzhDrV',  # Your YOLO model Google Drive ID
             'path': 'models/yolov5s-face.onnx',
             'required': True
         },
         'AntiSpoofing_bin_1.5_128.onnx': {
-            'drive_id': '1nH5G7dAHFE2KlW_H65txc8GDKSB7Zpy4',  # Your existing working ID
+            'drive_id': '1nH5G7dAHFE2KlW_H65txc8GDKSB7Zpy4',  # Your Anti-spoof model Google Drive ID
             'path': 'models/anti-spoofing/AntiSpoofing_bin_1.5_128.onnx',
             'required': True
         }
@@ -141,37 +141,57 @@ def setup_models():
     # Alternative working URLs for YOLO (try these first)
     yolo_working_urls = [
         'https://github.com/deepcam-cn/yolov5-face/releases/download/v6.0/yolov5s-face.onnx',
-        'https://huggingface.co/spaces/mikel-brostrom/yolo_tracking/resolve/main/weights/yolov5s-face.onnx',
+        'https://huggingface.co/arnabdhar/YOLOv5-Face/resolve/main/yolov5s-face.onnx',
         'https://github.com/deepcam-cn/yolov5-face/raw/master/weights/yolov5s-face.onnx'
     ]
     
     # Try downloading YOLO from working URLs first
     yolo_downloaded = False
+    print("Attempting to download YOLO Face model...")
+    
     for i, url in enumerate(yolo_working_urls):
         print(f"Trying YOLO URL {i+1}/{len(yolo_working_urls)}: {url}")
-        if download_from_url(url, models_config['yolov5s-face.onnx']['path']):
-            yolo_downloaded = True
-            print(f"YOLO model downloaded successfully from URL {i+1}")
-            break
+        try:
+            if download_from_url(url, models_config['yolov5s-face.onnx']['path']):
+                yolo_downloaded = True
+                print(f"✅ YOLO model downloaded successfully from URL {i+1}")
+                break
+        except Exception as e:
+            print(f"❌ Failed URL {i+1}: {e}")
+            continue
     
     # If URL download failed, try Google Drive
-    if not yolo_downloaded and models_config['yolov5s-face.onnx']['drive_id'] != 'YOUR_YOLO_GOOGLE_DRIVE_FILE_ID':
-        print("Trying YOLO download from Google Drive...")
-        yolo_downloaded = download_file_from_google_drive(
-            models_config['yolov5s-face.onnx']['drive_id'],
-            models_config['yolov5s-face.onnx']['path']
-        )
+    if not yolo_downloaded:
+        print("All URLs failed. Trying YOLO download from Google Drive...")
+        try:
+            yolo_downloaded = download_file_from_google_drive(
+                models_config['yolov5s-face.onnx']['drive_id'],
+                models_config['yolov5s-face.onnx']['path']
+            )
+            if yolo_downloaded:
+                print("✅ YOLO model downloaded successfully from Google Drive")
+        except Exception as e:
+            print(f"❌ Google Drive download also failed: {e}")
     
-    # Download anti-spoofing model from Google Drive (already working)
+    # Download anti-spoofing model from Google Drive
     print("Downloading Anti-spoofing model from Google Drive...")
-    antispoof_downloaded = download_file_from_google_drive(
-        models_config['AntiSpoofing_bin_1.5_128.onnx']['drive_id'],
-        models_config['AntiSpoofing_bin_1.5_128.onnx']['path']
-    )
+    antispoof_downloaded = False
+    try:
+        antispoof_downloaded = download_file_from_google_drive(
+            models_config['AntiSpoofing_bin_1.5_128.onnx']['drive_id'],
+            models_config['AntiSpoofing_bin_1.5_128.onnx']['path']
+        )
+        if antispoof_downloaded:
+            print("✅ Anti-spoofing model downloaded successfully")
+    except Exception as e:
+        print(f"❌ Anti-spoofing model download failed: {e}")
     
-    # Print status
+    # Print final status
+    print("\n" + "="*50)
+    print("MODEL DOWNLOAD STATUS:")
     print(f"YOLO Face Model: {'✅ Available' if yolo_downloaded else '❌ Failed'}")
     print(f"Anti-Spoof Model: {'✅ Available' if antispoof_downloaded else '❌ Failed'}")
+    print("="*50 + "\n")
     
     return yolo_downloaded, antispoof_downloaded
 
