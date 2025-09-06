@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Dashboard - Face Recognition Attendance System</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+  <style>
+    /* Global Styles */
+    :root {
+      --primary: #3b82f6;
+      --primary-dark: #2563eb;
+      --secondary: #60a5fa;
+      --accent: #10b981;
+      --bg-dark: #111111;
+      --bg-dark-2: #1a1a1a;
+      --bg-dark-3: #222222;
+      --text-light: #f8fafc;
+      --text-gray: #94a3b8;
+      --text-gray-lighter: #cbd5e1;
+      --card-bg: #1e1e1e;
+      --card-border: #333333;
+      --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+      --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.5);
+      --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.5);
+      --shadow-glow: 0 0 15px rgba(59, 130, 246, 0.5);
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --border-radius: 8px;
+    }
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      font-family: 'Inter', 'Segoe UI', Roboto, Arial, sans-serif;
+    }
+    body {
+      background-color: var(--bg-dark);
+      color: var(--text-light);
+      line-height: 1.6;
+    }
+    .container {
+      width: 100%;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 20px;
+    }
+    /* Header Styles */
+    .header {
+      background-color: rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    }
+    .header-content {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      height: 70px;
+    }
+    .logo {
+      display: flex;
+      align-items: center;
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: var(--primary);
+      text-decoration: none;
+      transition: all 0.3s;
+    }
+    .logo i { margin-right: 10px; }
+    .logo:hover {
+      color: var(--secondary);
+      text-shadow: 0 0 10px rgba(59,130,246,0.6);
+    }
+    .nav-links { display: flex; list-style: none; }
+    .nav-links li { margin-left: 30px; }
+    .nav-links a {
+      color: var(--text-light);
+      text-decoration: none;
+      font-weight: 500;
+      font-size: 1rem;
+      transition: all 0.3s;
+      position: relative;
+      padding: 5px 0;
+    }
+    .nav-links a:hover { color: var(--primary); }
+    .nav-links a::after {
+      content: '';
+      position: absolute; bottom: -2px; left: 0;
+      width: 0; height: 2px; background-color: var(--primary);
+      transition: width 0.3s, box-shadow 0.3s;
+    }
+    .nav-links a:hover::after { width: 100%; box-shadow: 0 0 5px var(--primary); }
+    .mobile-menu-btn {
+      display: none; background: none; border: none;
+      font-size: 1.5rem; color: var(--text-light); cursor: pointer;
+    }
+    /* Main Content */
+    .main-content { padding: 40px 0; }
+    /* Dashboard Card */
+    .dashboard-card {
+      background-color: var(--card-bg);
+      border-radius: var(--border-radius);
+      box-shadow: var(--shadow-md);
+      overflow: hidden;
+      margin-bottom: 30px;
+      border: 1px solid var(--card-border);
+      transition: transform 0.3s, box-shadow 0.3s;
+    }
+    .dashboard-card:hover { transform: translateY(-5px); box-shadow: var(--shadow-lg); }
+    .card-header {
+      background-color: rgba(0, 0, 0, 0.2);
+      padding: 20px 25px;
+      border-bottom: 1px solid var(--card-border);
+      display: flex; align-items: center; position: relative;
+    }
+    .card-header::before {
+      content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 3px;
+      background: linear-gradient(90deg, var(--primary), transparent);
+    }
+    .card-header h2 { font-size: 1.75rem; font-weight: 600; color: var(--text-light); margin: 0; display: flex; align-items: center; }
+    .card-header h2 i { margin-right: 12px; color: var(--primary); }
+    .card-body { padding: 25px; }
+    /* Alert */
+    .alert {
+      padding: 15px 20px; border-radius: var(--border-radius); margin-bottom: 25px;
+      display: flex; align-items: center; position: relative; border-left: 4px solid transparent;
+    }
+    .alert i { margin-right: 12px; font-size: 1.2rem; }
+    .alert-success { background-color: rgba(16,185,129,0.1); border-color: var(--success); color: var(--success); }
+    .alert-warning { background-color: rgba(245,158,11,0.1); border-color: var(--warning); color: var(--warning); }
+    .alert-danger  { background-color: rgba(239,68,68,0.1); border-color: var(--danger);  color: var(--danger);  }
+    /* Grid */
+    .row { display: flex; flex-wrap: wrap; margin: 0 -15px; }
+    .col-md-4, .col-md-8, .col-md-12 { padding: 0 15px; margin-bottom: 25px; }
+    .col-md-4  { width: 33.333333%; }
+    .col-md-8  { width: 66.666667%; }
+    .col-md-12 { width: 100%; }
+    /* Student Profile */
+    .profile-card {
+      background-color: rgba(0,0,0,0.2);
+      border-radius: var(--border-radius);
+      padding: 25px; text-align: center; border: 1px solid var(--card-border);
+      height: 100%; position: relative; overflow: hidden;
+    }
+    .profile-card::before {
+      content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 3px;
+      background: linear-gradient(90deg, var(--primary), transparent);
+    }
+    .profile-image {
+      width: 150px; height: 150px; object-fit: cover; border-radius: 50%;
+      border: 3px solid var(--primary); margin: 0 auto 20px;
+      box-shadow: 0 0 15px rgba(59,130,246,0.3); transition: transform 0.3s, box-shadow 0.3s;
+    }
+    .profile-image:hover { transform: scale(1.05); box-shadow: 0 0 20px rgba(59,130,246,0.5); }
+    .no-image-placeholder {
+      width: 150px; height: 150px; background-color: rgba(0,0,0,0.3); border-radius: 50%;
+      display: flex; align-items: center; justify-content: center; color: var(--text-gray);
+      margin: 0 auto 20px; border: 3px solid var(--card-border); position: relative; overflow: hidden;
+    }
+    .no-image-placeholder i { font-size: 3rem; color: var(--primary); opacity: 0.7; }
+    .profile-card h3 { font-size: 1.5rem; margin-bottom: 15px; color: var(--primary); }
+    /* Student Info */
+    .info-card {
+      background-color: rgba(0,0,0,0.2);
+      border-radius: var(--border-radius);
+      padding: 25px; border: 1px solid var(--card-border); height: 100%; position: relative;
+    }
+    .info-card::before {
+      content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 3px;
+      background: linear-gradient(90deg, var(--primary), transparent);
+    }
+    .info-card h3 { font-size: 1.5rem; margin-bottom: 20px; color: var(--primary); display: flex; align-items: center; }
+    .info-card h3 i { margin-right: 12px; }
+    .info-item { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.1); }
+    .info-item:last-child { border-bottom: none; }
+    .info-label { font-weight: 600; color: var(--text-gray-lighter); }
+    .info-value { color: var(--text-light); }
+    /* Attendance Action Area */
+    .attendance-action-area {
+      background-color: rgba(0,0,0,0.2); border-radius: var(--border-radius); padding: 25px;
+      border: 1px solid var(--card-border); margin-top: 30px; position: relative;
+    }
+    .attendance-action-area::before {
+      content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 3px;
+      background: linear-gradient(90deg, var(--primary), transparent);
+    }
+    .attendance-action-title { font-size: 1.5rem; margin-bottom: 20px; color: var(--primary); display: flex; align-items: center; }
+    .attendance-action-title i { margin-right: 12px; }
+    .mark-attendance-btn {
+      background: linear-gradient(to right, var(--primary), var(--primary-dark));
+      color: var(--text-light); border: none; padding: 14px 25px; border-radius: var(--border-radius);
+      font-size: 1rem; font-weight: 600; cursor: pointer; width: 100%; transition: all 0.3s;
+      position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+    }
+    .mark-attendance-btn i { margin-right: 10px; }
+    .mark-attendance-btn::before {
+      content: ''; position: absolute; top: 0; left: -100%; width: 100%; height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent); transition: 0.5s;
+    }
+    .mark-attendance-btn:hover::before { left: 100%; }
+    .mark-attendance-btn:hover { transform: translateY(-3px); box-shadow: 0 6px 15px rgba(59,130,246,0.4); }
+    .attendance-dropdown-container { margin-top: 20px; display: none; animation: fadeIn 0.3s ease; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(-10px);} to {opacity: 1; transform: translateY(0);} }
+    .attendance-dropdown { margin-bottom: 20px; }
+    .attendance-dropdown label { display: block; margin-bottom: 8px; color: var(--text-gray-lighter); font-weight: 500; }
+    .attendance-dropdown select {
+      width: 100%; padding: 12px 16px; background-color: var(--bg-dark-3); border: 1px solid var(--card-border);
+      border-radius: var(--border-radius); color: var(--text-light); font-size: 1rem; appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%23cbd5e1' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14L2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E");
+      background-repeat: no-repeat; background-position: right 16px center; background-size: 16px 12px; transition: all 0.3s;
+    }
+    .attendance-dropdown select:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 2px rgba(59,130,246,0.25); }
+    .attendance-dropdown select:hover { border-color: var(--primary); }
+    /* Camera */
+    .camera-container {
+      width: 100%; max-width: 450px; margin: 0 auto 20px; border: 2px solid var(--primary);
+      border-radius: var(--border-radius); overflow: hidden; background: #000; position: relative; box-shadow: var(--shadow-md);
+    }
+    .camera-feed { display: block; width: 100%; height: auto; }
+    .camera-overlay {
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+      display: flex; justify-content: center; align-items: center;
+      background: rgba(0, 0, 0, 0.7); color: var(--text-light); font-size: 1.25rem; font-weight: 600; backdrop-filter: blur(4px);
+      z-index: 4;
+    }
+    .overlay-img {
+      position: absolute; top: 0; left: 0; width: 100%; height: auto; z-index: 2; pointer-events: none;
+    }
+    .camera-buttons { display: flex; justify-content: center; gap: 15px; margin-top: 20px; }
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      padding: 12px 24px; font-size: 1rem; font-weight: 600; border-radius: var(--border-radius);
+      text-decoration: none; transition: all 0.3s; cursor: pointer; border: none; position: relative; overflow: hidden;
+    }
+    .btn i { margin-right: 8px; }
+    .btn::before {
+      content: ''; position: absolute; top: 0; left: -100%; width: 100%; height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent); transition: 0.5s;
+    }
+    .btn:hover::before { left: 100%; }
+    .btn:hover { transform: translateY(-3px); }
+    .btn-primary {
+      background: linear-gradient(to right, var(--primary), var(--primary-dark)); color: var(--text-light); box-shadow: 0 4px 10px rgba(59,130,246,0.3);
+    }
+    .btn-primary:hover { box-shadow: 0 6px 15px rgba(59,130,246,0.4); }
+    .btn-info {
+      background: linear-gradient(to right, var(--secondary), #4a96f8); color: var(--text-light); box-shadow: 0 4px 10px rgba(96,165,250,0.3);
+    }
+    .btn-info:hover { box-shadow: 0 6px 15px rgba(96,165,250,0.4); }
+    .btn-warning {
+      background: linear-gradient(to right, var(--warning), #d97706); color: var(--text-light); box-shadow: 0 4px 10px rgba(245,158,11,0.3);
+    }
+    .btn-warning:hover { box-shadow: 0 6px 15px rgba(245,158,11,0.4); }
+    /* Attendance Records */
+    .attendance-section { margin-top: 30px; }
+    .attendance-section-title { font-size: 1.5rem; margin-bottom: 20px; color: var(--primary); display: flex; align-items: center; }
+    .attendance-section-title i { margin-right: 12px; }
+    .table-responsive { overflow-x: auto; border-radius: var(--border-radius); border: 1px solid var(--card-border); background-color: rgba(0,0,0,0.2); }
+    .attendance-table { width: 100%; border-collapse: separate; border-spacing: 0; }
+    .attendance-table th, .attendance-table td { padding: 15px 20px; text-align: left; }
+    .attendance-table th {
+      background-color: rgba(0,0,0,0.3); color: var(--text-gray-lighter); font-weight: 600; border-bottom: 1px solid var(--card-border);
+    }
+    .attendance-table tr:not(:last-child) td { border-bottom: 1px solid rgba(255,255,255,0.05); }
+    .attendance-table tr:hover td { background-color: rgba(59,130,246,0.05); }
+    .status-present { color: var(--success); font-weight: 600; display: flex; align-items: center; }
+    .status-present i { margin-right: 6px; }
+    .status-absent { color: var(--danger); font-weight: 600; display: flex; align-items: center; }
+    .status-absent i { margin-right: 6px; }
+    /* Utility */
+    .d-none { display: none !important; }
+    .mb-2 { margin-bottom: 10px; }
+    .mb-3 { margin-bottom: 15px; }
+    .mb-4 { margin-bottom: 20px; }
+    .mt-4 { margin-top: 20px; }
+    /* Responsive */
+    @media screen and (max-width: 768px) {
+      .row { flex-direction: column; }
+      .col-md-4, .col-md-8, .col-md-12 { width: 100%; }
+      .nav-links {
+        display: none; position: absolute; top: 70px; left: 0; right: 0; background-color: rgba(0,0,0,0.95);
+        flex-direction: column; box-shadow: var(--shadow-md); padding: 20px 0; z-index: 10;
+        border-bottom: 1px solid rgba(255,255,255,0.05); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+      }
+      .nav-links.active { display: flex; }
+      .nav-links li { margin: 0; text-align: center; padding: 15px 0; }
+      .mobile-menu-btn { display: block; }
+      .camera-buttons { flex-direction: column; }
+      .btn { width: 100%; }
+    }
+    @media screen and (max-width: 576px) {
+      .card-body, .profile-card, .info-card, .attendance-action-area { padding: 20px 15px; }
+      .card-header { padding: 15px 20px; }
+      .attendance-table th, .attendance-table td { padding: 12px 15px; }
+    }
+  </style>
+</head>
+<body>
+   Header 
+  <header class="header">
+    <div class="container header-content">
+      <a href="/" class="logo"><i class="fas fa-user-check"></i> Face Attendance System</a>
+      <ul class="nav-links">
+        <li><a href="/dashboard">Dashboard</a></li>
+        <li><a href="/logout">Logout</a></li>
+      </ul>
+      <button class="mobile-menu-btn"><i class="fas fa-bars"></i></button>
+    </div>
+  </header>
+
+   Main Content 
+  <main class="main-content">
+    <div class="container">
+      <div class="dashboard-card">
+        <div class="card-header">
+          <h2><i class="fas fa-tachometer-alt"></i> Student Dashboard</h2>
+        </div>
+        <div class="card-body">
+           Flash Messages 
+          {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+              {% for category, message in messages %}
+                <div class="alert alert-{{ category }}">
+                  <i class="fas fa-{% if category == 'success' %}check-circle{% elif category == 'warning' %}exclamation-triangle{% elif category == 'danger' %}times-circle{% endif %}"></i>
+                  {{ message }}
+                </div>
+              {% endfor %}
+            {% endif %}
+          {% endwith %}
+
+          <div class="row">
+            <div class="col-md-4">
+              <div class="profile-card">
+                <h3>Profile Image</h3>
+                {% if student.face_image_url %}
+                  <img src="{{ student.face_image_url }}" alt="Student Face" class="profile-image"/>
+                {% else %}
+                  <div class="no-image-placeholder"><i class="fas fa-user"></i></div>
+                {% endif %}
+              </div>
+            </div>
+            <div class="col-md-8">
+              <div class="info-card">
+                <h3><i class="fas fa-user-graduate"></i> Welcome, {{ student.name }}!</h3>
+                <div class="info-item"><span class="info-label">Student ID:</span><span class="info-value">{{ student.student_id }}</span></div>
+                <div class="info-item"><span class="info-label">Email:</span><span class="info-value">{{ student.email }}</span></div>
+                <div class="info-item"><span class="info-label">Department:</span><span class="info-value">{{ student.department }}</span></div>
+                <div class="info-item"><span class="info-label">Course:</span><span class="info-value">{{ student.course }}</span></div>
+                <div class="info-item"><span class="info-label">Year:</span><span class="info-value">{{ student.year }}</span></div>
+                <div class="info-item"><span class="info-label">Division:</span><span class="info-value">{{ student.division }}</span></div>
+                <div class="info-item"><span class="info-label">Mobile:</span><span class="info-value">{{ student.mobile }}</span></div>
+              </div>
+            </div>
+          </div>
+
+           Mark Attendance Section 
+          <div class="attendance-action-area">
+            <h3 class="attendance-action-title"><i class="fas fa-clipboard-check"></i> Attendance Management</h3>
+
+            <button class="mark-attendance-btn" id="markAttendanceBtn" type="button">
+              <i class="fas fa-fingerprint"></i> Mark Your Attendance
+            </button>
+
+            <div class="attendance-dropdown-container" id="programDropdownContainer">
+              <div class="attendance-dropdown">
+                <label for="programSelect">Select Your Program:</label>
+                <select id="programSelect">
+                  <option value="">--Select Program--</option>
+                  <option value="BTech">BTech</option>
+                  <option value="IDD">IDD</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="attendance-dropdown-container" id="semesterDropdownContainer">
+              <div class="attendance-dropdown">
+                <label for="semesterSelect">Select Semester:</label>
+                <select id="semesterSelect">
+                  <option value="">--Select Semester--</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="attendance-dropdown-container" id="courseDropdownContainer">
+              <div class="attendance-dropdown">
+                <label for="courseSelect">Select Course:</label>
+                <select id="courseSelect">
+                  <option value="">--Select Course--</option>
+                </select>
+              </div>
+            </div>
+
+             Face Recognition Container 
+            <div class="attendance-dropdown-container" id="faceRecognitionContainer">
+              <div class="camera-container">
+                <div class="camera-wrapper" style="position: relative; display: inline-block; width: 100%;">
+                  <video id="faceVideo" class="camera-feed" autoplay playsinline></video>
+                   Server-rendered live overlay (YOLO + liveness) 
+                  <img id="livenessOverlayImg" class="overlay-img" alt="Live liveness overlay"/>
+                   Hidden capture canvas 
+                  <canvas id="faceCanvas" class="d-none"></canvas>
+                   Status overlay (visible during submit) 
+                  <div id="faceOverlay" class="camera-overlay d-none">
+                    <span id="recognitionStatus">Recognizing...</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="camera-buttons">
+              <button type="button" id="startFaceCamera" class="btn btn-info">
+                <i class="fas fa-camera"></i> Start Camera
+              </button>
+              <button type="button" id="captureAttendance" class="btn btn-primary d-none">
+                <i class="fas fa-check-circle"></i> Mark Attendance
+              </button>
+              <button type="button" id="cancelAttendance" class="btn btn-warning">
+                <i class="fas fa-times-circle"></i> Cancel
+              </button>
+            </div>
+          </div>
+
+          <div class="attendance-section">
+            <h3 class="attendance-section-title"><i class="fas fa-history"></i> Your Attendance Records</h3>
+            {% if attendance_records %}
+              <div class="table-responsive">
+                <table class="attendance-table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Subject</th>
+                      <th>Status</th>
+                      <th>Time</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for record in attendance_records %}
+                      <tr>
+                        <td>{{ record.date }}</td>
+                        <td>{{ record.subject }}</td>
+                        <td class="{% if record.status == 'present' %}status-present{% elif record.status == 'absent' %}status-absent{% endif %}">
+                          {% if record.status == 'present' %}
+                            <i class="fas fa-check-circle"></i> Present
+                          {% elif record.status == 'absent' %}
+                            <i class="fas fa-times-circle"></i> Absent
+                          {% endif %}
+                        </td>
+                        <td>{{ record.time }}</td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            {% else %}
+              <div class="alert alert-warning">
+                <i class="fas fa-exclamation-triangle"></i> No attendance records available yet.
+              </div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    // Mobile menu toggle
+    document.addEventListener('DOMContentLoaded', function () {
+      const mobileMenuBtn = document.querySelector('.mobile-menu-btn');
+      const navLinks = document.querySelector('.nav-links');
+      if (mobileMenuBtn) {
+        mobileMenuBtn.addEventListener('click', function () {
+          navLinks.classList.toggle('active');
+        });
+      }
+    });
+
+    // Course data from the PDF
+    const courseData = {
+      "BTech": {
+        "1": ["Classical Physics (IS) (PY111)", "Inorganic and Physical Chemistry (IS) (CY111)", "Real Analysis & Calculus (IS) (MA111)", "Computer Programming (IE) (CS101)", "Biology (IS) (BY101)", "Engineering Graphics (EP) (EP100)", "Universal Human Values (HU)"],
+        "2": ["Modern Physics (IS) (PY112)", "Fundamentals of Electronics Engineering (IE) (EC102)", "Differential Equations (IS) (MA121)", "Engineering Thermodynamics (IE) (CH161)", "Computer Sc Engg Practices (EP) (CS102)", "Physics lab (IS) (PY121L)", "Chemistry lab (IS) (CY121L)", "Workshop (EP) (ME131)", "Community Internship"],
+        "3": ["Linear Algebra & Complex Analysis (IS) (MA211)", "Discrete Mathematics (DC) (CS201)", "Data Structure and Algorithm (DC) (CS211)", "Programming with Python (DC) (CS221)", "Graphics and Visual Computing (DC) (CS231)", "Materials Science (IE) (CH211)"],
+        "4": ["Database Management Systems (DC) (CS212)", "Numerical Methods (IS) (MA141)", "Statistical Methods and Data Analysis (IS) (MA231)", "Web Technology (IE) (CS222)", "Computer Organization and Architecture (DC) (CS211)", "Digital Circuits and Systems (DC) (ECE221)"],
+        "5": ["Operating Systems (DC) (CS311)", "Microprocessor Engineering (DC)", "Theory of Computation (DC) (CS321)", "Software Engineering (DC) (CS331)", "DE-1 (DE)", "B.Tech. Project (DP)"],
+        "6": ["Design and Analysis of Algorithms (DC) (CS341)", "Computer Networks (DC) (CS351)", "Compiler Design (DC) (CS312)", "Operations Research (DC) (CS391)", "DE-2 (DE)", "B.Tech. Project (DP)"],
+        "7": ["Mobile Computing (DC) (CS411)", "DE-3 (DE)", "OE-1 (OE)", "L/M-1", "HSS", "B.Tech. Project (DP)"],
+        "8": ["Soft Computing (DC) (CS468)", "Digital Image Processing (DC) (CS431)", "Data Mining (DC) (CS458)", "DE-4 (DE)", "OE-2 (OE)", "L/M-2"]
+      },
+      "IDD": {
+        "1": ["Classical Physics (IS) (PY111)", "Inorganic and Physical Chemistry (IS) (CY111)", "Real Analysis & Calculus (IS) (MA111)", "Computer Programming (IE) (CS101)", "Biology (IS) (BY101)", "Engineering Graphics (EP) (EP100)", "Universal Human Values (HU)"],
+        "2": ["Modern Physics (IS) (PY112)", "Fundamentals of Electronics Engineering (IE) (EC102)", "Differential Equations (IS) (MA121)", "Engineering Thermodynamics (IE) (CH161)", "Computer Sc Engg Practices (EP) (CS102)", "Physics lab (IS) (PY121L)", "Chemistry lab (IS) (CY121L)", "Workshop (EP) (ME131)", "Community Internship"],
+        "3": ["Linear Algebra & Complex Analysis (IS) (MA211)", "Discrete Mathematics (DC) (CS201)", "Data Structure and Algorithm (DC) (CS211)", "Programming with Python (DC) (CS221)", "Graphics and Visual Computing (DC) (CS231)", "Materials Science (IE) (CH211)"],
+        "4": ["Database Management Systems (DC) (CS212)", "Numerical Methods (IS) (MA141)", "Statistical Methods and Data Analysis (IS) (MA231)", "Web Technology (IE) (CS222)", "Computer Organization and Architecture (DC) (CS211)", "Digital Circuits and Systems (DC) (ECE221)"],
+        "5": ["Operating Systems (DC) (CS311)", "Microprocessor Engineering (DC)", "Theory of Computation (DC) (CS321)", "Software Engineering (DC) (CS331)", "DE-1 (DE)", "B.Tech. Project (DP)"],
+        "6": ["Design and Analysis of Algorithms (DC) (CS341)", "Computer Networks (DC) (CS351)", "Compiler Design (DC) (CS312)", "Operations Research (DC) (CS391)", "DE-2 (DE)", "B.Tech. Project (DP)"],
+        "7": ["Mobile Computing (DC) (CS411)", "DE-3 (DE)", "OE-1 (OE)", "L/M-1", "HSS", "B.Tech. Project (DP)"],
+        "8": ["Soft Computing (DC) (CS468)", "Digital Image Processing (DC) (CS431)", "Data Mining (DC) (CS458)", "DE-4 (DE)", "OE-2 (OE)", "L/M-2", "Thesis"],
+        "9": ["DE-5 (DE)", "DE-6 (DE)", "DE-7 (DE)", "OE-3 (OE)", "OE-4 (OE)", "Thesis"],
+        "10": ["Thesis"]
+      }
+    };
+
+    // Mark Attendance Dropdown Logic
+    const markBtn = document.getElementById('markAttendanceBtn');
+    const programDropdownContainer = document.getElementById('programDropdownContainer');
+    const semesterDropdownContainer = document.getElementById('semesterDropdownContainer');
+    const courseDropdownContainer = document.getElementById('courseDropdownContainer');
+    const faceRecognitionContainer = document.getElementById('faceRecognitionContainer');
+
+    const programSelect = document.getElementById('programSelect');
+    const semesterSelect = document.getElementById('semesterSelect');
+    const courseSelect = document.getElementById('courseSelect');
+
+    // Camera elements
+    const faceVideo = document.getElementById('faceVideo');
+    const livenessOverlayImg = document.getElementById('livenessOverlayImg');
+    const faceCanvas = document.getElementById('faceCanvas');
+    const faceOverlay = document.getElementById('faceOverlay');
+    const recognitionStatus = document.getElementById('recognitionStatus');
+    const startFaceCamera = document.getElementById('startFaceCamera');
+    const captureAttendance = document.getElementById('captureAttendance');
+    const cancelAttendance = document.getElementById('cancelAttendance');
+
+    let faceStream = null;
+
+    // Live preview streaming state
+    const previewCanvas = document.createElement('canvas');
+    const previewCtx = previewCanvas.getContext('2d');
+    let previewTimer = null;
+    let previewActive = false;
+    let previewBusy = false;
+
+    function startPreview() {
+      if (previewActive) return;
+      previewActive = true;
+      // Stream ~2.5 fps
+      const intervalMs = 400;
+      previewTimer = setInterval(async () => {
+        if (!previewActive || previewBusy || !faceStream) return;
+        previewBusy = true;
+        try {
+          // Match overlay and video sizes
+          previewCanvas.width = faceVideo.videoWidth || 400;
+          previewCanvas.height = faceVideo.videoHeight || 300;
+          previewCtx.drawImage(faceVideo, 0, 0, previewCanvas.width, previewCanvas.height);
+          const frameDataUrl = previewCanvas.toDataURL('image/jpeg', 0.6);
+          const resp = await fetch('/liveness-preview', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ face_image: frameDataUrl })
+          });
+          const data = await resp.json();
+          if (data && data.overlay && livenessOverlayImg) {
+            livenessOverlayImg.src = data.overlay;
+          }
+          // We intentionally do not update recognitionStatus during preview
+        } catch (e) {
+          // Silent fail for preview
+        } finally {
+          previewBusy = false;
+        }
+      }, intervalMs);
+    }
+
+    function stopPreview() {
+      previewActive = false;
+      if (previewTimer) { clearInterval(previewTimer); previewTimer = null; }
+      previewBusy = false;
+    }
+
+    markBtn.addEventListener('click', function () {
+      programDropdownContainer.style.display = 'block';
+      semesterDropdownContainer.style.display = 'none';
+      courseDropdownContainer.style.display = 'none';
+      faceRecognitionContainer.style.display = 'none';
+      programSelect.value = "";
+      semesterSelect.innerHTML = '<option value="">--Select Semester--</option>';
+      courseSelect.innerHTML = '<option value="">--Select Course--</option>';
+    });
+
+    programSelect.addEventListener('change', function () {
+      semesterDropdownContainer.style.display = programSelect.value ? 'block' : 'none';
+      courseDropdownContainer.style.display = 'none';
+      faceRecognitionContainer.style.display = 'none';
+      semesterSelect.innerHTML = '<option value="">--Select Semester--</option>';
+      courseSelect.innerHTML = '<option value="">--Select Course--</option>';
+      const program = programSelect.value;
+      if (program) {
+        const totalSemesters = program === "BTech" ? 8 : 10;
+        for (let i = 1; i <= totalSemesters; i++) {
+          const opt = document.createElement('option');
+          opt.value = i;
+          opt.textContent = `Semester ${i}`;
+          semesterSelect.appendChild(opt);
+        }
+      }
+    });
+
+    semesterSelect.addEventListener('change', function () {
+      const program = programSelect.value;
+      const semester = semesterSelect.value;
+      courseDropdownContainer.style.display = semester ? 'block' : 'none';
+      faceRecognitionContainer.style.display = 'none';
+      courseSelect.innerHTML = '<option value="">--Select Course--</option>';
+      if (program && semester && courseData[program] && courseData[program][semester]) {
+        const courses = courseData[program][semester];
+        courses.forEach(course => {
+          const opt = document.createElement('option');
+          opt.value = course;
+          opt.textContent = course;
+          courseSelect.appendChild(opt);
+        });
+      }
+    });
+
+    courseSelect.addEventListener('change', function () {
+      faceRecognitionContainer.style.display = courseSelect.value ? 'block' : 'none';
+    });
+
+    // Start camera
+    startFaceCamera.addEventListener('click', async function () {
+      try {
+        faceStream = await navigator.mediaDevices.getUserMedia({
+          video: { width: 400, height: 300, facingMode: 'user' }
+        });
+        faceVideo.srcObject = faceStream;
+        await faceVideo.play();
+
+        // Ensure overlay image matches video size (CSS handles width)
+        livenessOverlayImg.src = '';
+
+        startFaceCamera.classList.add('d-none');
+        captureAttendance.classList.remove('d-none');
+
+        startPreview(); // Start live liveness overlay streaming
+      } catch (err) {
+        console.error('Error accessing camera:', err);
+        alert('Could not access the camera. Please make sure it is connected and permissions are granted.');
+      }
+    });
+
+    // Submit attendance: capture still, post to /mark-attendance
+    captureAttendance.addEventListener('click', function () {
+      faceOverlay.classList.remove('d-none');
+
+      const ctx = faceCanvas.getContext('2d');
+      faceCanvas.width = faceVideo.videoWidth || 400;
+      faceCanvas.height = faceVideo.videoHeight || 300;
+      ctx.drawImage(faceVideo, 0, 0, faceCanvas.width, faceCanvas.height);
+
+      const imageData = faceCanvas.toDataURL('image/jpeg', 0.9);
+      const attendanceData = {
+        student_id: '{{ student.student_id }}',
+        program: programSelect.value,
+        semester: semesterSelect.value,
+        course: courseSelect.value,
+        face_image: imageData
+      };
+
+      fetch('/mark-attendance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(attendanceData)
+      })
+      .then(response => response.json())
+      .then(data => {
+        // Show final server overlay from attendance endpoint (bbox + label)
+        if (data.overlay && livenessOverlayImg) {
+          livenessOverlayImg.src = data.overlay;
+        }
+
+        // Show only two final messages as requested:
+        // - "Spoof detected" if spoof blocked (message contains "spoof")
+        // - "Attendance marked successfully" otherwise on success
+        const msg = (data.message || '').toLowerCase();
+        if (!data.success && msg.includes('spoof')) {
+          recognitionStatus.textContent = 'Spoof detected';
+          recognitionStatus.style.color = '#ef4444';
+          setTimeout(() => { faceOverlay.classList.add('d-none'); }, 2500);
+          return;
+        }
+
+        if (data.success) {
+          recognitionStatus.textContent = 'Attendance marked successfully';
+          recognitionStatus.style.color = '#10b981';
+          setTimeout(() => { window.location.reload(); }, 2000);
+        } else {
+          // Other failures (e.g., face not recognized)
+          recognitionStatus.textContent = data.message || 'Face not recognized. Please try again.';
+          recognitionStatus.style.color = '#ef4444';
+          setTimeout(() => { faceOverlay.classList.add('d-none'); }, 3000);
+        }
+      })
+      .catch(error => {
+        console.error('Error:', error);
+        recognitionStatus.textContent = 'Error processing request';
+        recognitionStatus.style.color = '#ef4444';
+        setTimeout(() => {
+          faceOverlay.classList.add('d-none');
+        }, 3000);
+      });
+    });
+
+    // Cancel attendance flow
+    cancelAttendance.addEventListener('click', function () {
+      stopPreview();
+      if (faceStream) {
+        faceStream.getTracks().forEach(track => track.stop());
+      }
+      faceVideo.srcObject = null;
+      if (livenessOverlayImg) livenessOverlayImg.src = '';
+      faceOverlay.classList.add('d-none');
+      startFaceCamera.classList.remove('d-none');
+      captureAttendance.classList.add('d-none');
+
+      faceRecognitionContainer.style.display = 'none';
+      courseSelect.value = "";
+      semesterSelect.value = "";
+      programSelect.value = "";
+      semesterDropdownContainer.style.display = 'none';
+      courseDropdownContainer.style.display = 'none';
+    });
+
+    // Cleanup on page unload
+    window.addEventListener('beforeunload', () => {
+      stopPreview();
+      if (faceStream) {
+        faceStream.getTracks().forEach(t => t.stop());
+      }
+    });
+  </script>
+</body>
+</html>

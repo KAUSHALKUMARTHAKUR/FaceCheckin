@@ -1,0 +1,591 @@
+<!-- <!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>System Metrics</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; padding: 16px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(300px,1fr)); gap: 16px; }
+    .card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 16px; }
+    .muted { color: #6b7280; font-size: 12px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 8px; border-bottom: 1px solid #e5e7eb; text-align: left; font-size: 14px; }
+    th { background: #f9fafb; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; }
+    .ok { background: #dcfce7; color: #166534; }
+    .warn { background: #fee2e2; color: #991b1b; }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
+</head>
+<body>
+  <h1>Face Attendance System Metrics</h1>
+  <p class="muted">Evaluating Dlib Face Recognition (ResNet v1) + 68-point Landmark Alignment during attendance.</p>
+
+  <div class="grid" style="margin-top: 12px;">
+    <div class="card">
+      <h3>Summary</h3>
+      <div id="summary">
+        <div>Total Attempts: <strong id="totalAttempts">-</strong></div>
+        <div>Recognized: <strong id="recognized">-</strong></div>
+        <div>Spoof Blocked: <strong id="spoofBlocked">-</strong></div>
+        <div>False Rejects: <strong id="falseRejects">-</strong></div>
+        <div>Unauthorized: <strong id="unauthorized">-</strong></div>
+        <hr />
+        <div>Accuracy: <strong id="accuracyPct">-</strong>%</div>
+        <div>FRR: <strong id="frrPct">-</strong>%</div>
+        <div>FAR: <strong id="farPct">-</strong>%</div>
+        <div>Avg Latency: <strong id="avgLatency">-</strong> ms</div>
+        <div>Avg Distance: <strong id="avgDistance">-</strong></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Outcomes</h3>
+      <canvas id="barOutcomes" height="200"></canvas>
+    </div>
+
+    <div class="card">
+      <h3>Latency Over Time</h3>
+      <canvas id="lineLatency" height="200"></canvas>
+    </div>
+
+    <div class="card">
+      <h3>Distance Histogram</h3>
+      <canvas id="histDistance" height="200"></canvas>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px;">
+    <h3>Recent Attendance Attempts</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Time (UTC)</th>
+          <th>Student</th>
+          <th>Course</th>
+          <th>Decision</th>
+          <th>Distance</th>
+          <th>Live Prob</th>
+          <th>Live Label</th>
+          <th>Latency (ms)</th>
+        </tr>
+      </thead>
+      <tbody id="eventsBody"></tbody>
+    </table>
+  </div>
+
+  <script>
+    async function fetchJSON(url) {
+      const res = await fetch(url);
+      return res.json();
+    }
+
+    function renderSummary(data) {
+      const totals = data.enhanced?.totals || {};
+      document.getElementById('totalAttempts').textContent = totals.attempts ?? '0';
+      document.getElementById('recognized').textContent = totals.recognized ?? '0';
+      document.getElementById('spoofBlocked').textContent = totals.spoof_blocked ?? '0';
+      document.getElementById('falseRejects').textContent = totals.false_rejects ?? '0';
+      document.getElementById('unauthorized').textContent = totals.unauthorized ?? '0';
+      document.getElementById('accuracyPct').textContent = data.enhanced?.accuracy_pct ?? '0';
+      document.getElementById('frrPct').textContent = data.enhanced?.frr_pct ?? '0';
+      document.getElementById('farPct').textContent = data.enhanced?.far_pct ?? '0';
+      document.getElementById('avgLatency').textContent = data.enhanced?.avg_latency_ms ?? '—';
+      document.getElementById('avgDistance').textContent = data.enhanced?.avg_distance ?? '—';
+    }
+
+    function buildBarOutcomes(ctx, totals) {
+      return new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: ['Recognized', 'Spoof Blocked', 'Not Recognized', 'False Rejects', 'Unauthorized'],
+          datasets: [{
+            label: 'Count',
+            data: [
+              totals.recognized || 0,
+              totals.spoof_blocked || 0,
+              totals.not_recognized || 0,
+              totals.false_rejects || 0,
+              totals.unauthorized || 0
+            ],
+            backgroundColor: ['#10b981', '#ef4444', '#f59e0b', '#f97316', '#6b7280']
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { display: false } },
+          scales: { y: { beginAtZero: true, ticks: { precision:0 } } }
+        }
+      });
+    }
+
+    function buildLineLatency(ctx, events) {
+      const points = (events || []).slice().reverse().map(ev => ({
+        x: new Date(ev.ts),
+        y: ev.latency_ms ?? 0
+      }));
+      return new Chart(ctx, {
+        type: 'line',
+        data: {
+          datasets: [{
+            label: 'Latency (ms)',
+            data: points,
+            borderColor: '#3b82f6',
+            fill: false,
+            tension: 0.2
+          }]
+        },
+        options: {
+          responsive: true,
+          parsing: false,
+          scales: {
+            x: { type: 'time', time: { unit: 'minute' } },
+            y: { beginAtZero: true }
+          }
+        }
+      });
+    }
+
+    function buildHistDistance(ctx, events) {
+      const vals = (events || []).map(ev => ev.distance).filter(v => typeof v === 'number');
+      if (vals.length === 0) {
+        return new Chart(ctx, { type: 'bar', data: { labels: [], datasets: [] }});
+      }
+      const bins = [0.2,0.3,0.4,0.5,0.6,0.7,1.0];
+      const counts = Array(bins.length).fill(0);
+      for (const v of vals) {
+        const idx = bins.findIndex(b => v <= b);
+        counts[idx >= 0 ? idx : counts.length-1] += 1;
+      }
+      return new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: ['≤0.2','≤0.3','≤0.4','≤0.5','≤0.6','≤0.7','≤1.0'],
+          datasets: [{ label: 'Distances', data: counts, backgroundColor: '#8b5cf6' }]
+        },
+        options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+      });
+    }
+
+    function renderTable(events) {
+      const tbody = document.getElementById('eventsBody');
+      tbody.innerHTML = '';
+      for (const ev of events) {
+        const tr = document.createElement('tr');
+        const tds = [
+          new Date(ev.ts).toISOString().replace('T',' ').replace('Z',''),
+          ev.student_id || '—',
+          ev.course || '—',
+          ev.decision || '—',
+          (typeof ev.distance === 'number' ? ev.distance.toFixed(3) : '—'),
+          (typeof ev.live_prob === 'number' ? ev.live_prob.toFixed(2) : '—'),
+          ev.live_label || '—',
+          (typeof ev.latency_ms === 'number' ? ev.latency_ms.toFixed(1) : '—')
+        ];
+        tds.forEach((txt, i) => {
+          const td = document.createElement('td');
+          if (i === 3) {
+            const span = document.createElement('span');
+            span.className = 'badge ' + (txt === 'recognized' ? 'ok' : 'warn');
+            span.textContent = txt;
+            td.appendChild(span);
+          } else {
+            td.textContent = txt;
+          }
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      }
+    }
+
+    async function loadAll() {
+      const [summary, events] = await Promise.all([
+        fetchJSON('/metrics-json'),
+        fetchJSON('/metrics-events?limit=200')
+      ]);
+
+      renderSummary(summary);
+
+      const totals = summary.enhanced?.totals || {};
+      const barCtx = document.getElementById('barOutcomes').getContext('2d');
+      buildBarOutcomes(barCtx, totals);
+
+      const lineCtx = document.getElementById('lineLatency').getContext('2d');
+      buildLineLatency(lineCtx, events);
+
+      const histCtx = document.getElementById('histDistance').getContext('2d');
+      buildHistDistance(histCtx, events);
+
+      renderTable(events);
+    }
+
+    // Chart.js time scale requires a time adapter. Use built-in Intl API.
+    if (!('Chart' in window)) {
+      window.addEventListener('load', loadAll);
+    } else {
+      loadAll();
+    }
+  </script>
+</body>
+</html> -->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>System Metrics</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root{
+    --bg:#0b1020;
+    --panel:#0f172a;
+    --muted:#94a3b8;
+    --text:#e2e8f0;
+    --border:#1f2937;
+    --green:#10b981;
+    --red:#ef4444;
+    --amber:#f59e0b;
+    --blue:#3b82f6;
+    --violet:#8b5cf6;
+    --card-radius:14px;
+    --shadow:0 10px 30px rgba(2,6,23,0.5);
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; padding:24px;
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    color:var(--text); background: radial-gradient(1200px 800px at 10% -10%, #0a1445 0%, transparent 60%) ,var(--bg);
+  }
+  header{
+    display:flex; align-items:center; justify-content:space-between; margin-bottom:20px;
+  }
+  h1{font-size:28px; margin:0;}
+  .sub{color:var(--muted); margin-top:6px; font-size:14px;}
+  .grid{ display:grid; gap:16px; }
+  .grid.cols-4{ grid-template-columns: repeat(4, minmax(0,1fr)); }
+  .grid.cols-3{ grid-template-columns: repeat(3, minmax(0,1fr)); }
+  .grid.cols-2{ grid-template-columns: repeat(2, minmax(0,1fr)); }
+  @media (max-width: 1100px){ .grid.cols-4{ grid-template-columns: repeat(2, minmax(0,1fr)); } }
+  @media (max-width: 640px){ .grid.cols-3,.grid.cols-2,.grid.cols-4{ grid-template-columns: 1fr; } }
+
+  .card{
+    background: linear-gradient(180deg, rgba(255,255,255,0.03), transparent),
+                var(--panel);
+    border:1px solid var(--border);
+    border-radius: var(--card-radius);
+    padding:16px;
+    box-shadow: var(--shadow);
+  }
+  .kpi{
+    display:flex; align-items:center; justify-content:space-between; gap:8px;
+    padding:12px 10px; border-radius:12px; background: rgba(255,255,255,0.02);
+    border:1px solid var(--border);
+  }
+  .kpi .label{ color:var(--muted); font-size:12px; }
+  .kpi .value{ font-size:22px; font-weight:800; }
+  .value.green{ color:var(--green); }
+  .value.red{ color:var(--red); }
+  .value.blue{ color:var(--blue); }
+  .value.amber{ color:var(--amber); }
+
+  .card h3{ margin:0 0 10px 0; font-size:16px; color:#cbd5e1; letter-spacing:.2px; }
+
+  .charts .card{ padding:18px; }
+  canvas{ width:100%; height:auto; }
+
+  table{
+    width:100%; border-collapse: collapse; margin-top:8px;
+    border:1px solid var(--border); border-radius:12px; overflow:hidden;
+    background: var(--panel);
+  }
+  thead th{
+    font-size:12px; letter-spacing:.2px; text-transform:uppercase;
+    color:var(--muted); background: rgba(255,255,255,0.02);
+    border-bottom:1px solid var(--border); padding:10px;
+  }
+  tbody td{
+    font-size:14px; padding:10px; border-bottom:1px solid var(--border);
+  }
+  tbody tr:hover td{ background: rgba(59,130,246,0.05); }
+
+  .pill{
+    display:inline-block; padding:3px 10px; border-radius:999px; font-size:12px;
+    border:1px solid var(--border); color:var(--muted);
+    background: rgba(255,255,255,0.03);
+  }
+  .pill.accept_true{ color:var(--green); border-color:#064e3b; background:#04281f80; }
+  .pill.accept_false{ color:var(--red); border-color:#7f1d1d; background:#2f131380; }
+  .pill.reject_true{ color:var(--blue); border-color:#1e3a8a; background:#0b1f4d80; }
+  .pill.reject_false{ color:var(--amber); border-color:#92400e; background:#3a1d0a80; }
+
+  .muted{ color:var(--muted); }
+  .legend{
+    display:flex; gap:10px; flex-wrap:wrap; margin-top:6px;
+  }
+  .legend .item{ display:flex; align-items:center; gap:6px; color:var(--muted); font-size:12px; }
+  .dot{ width:10px; height:10px; border-radius:2px; }
+  .dot.ta{ background:var(--green); }
+  .dot.fa{ background:var(--red); }
+  .dot.tr{ background:var(--blue); }
+  .dot.fr{ background:var(--amber); }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Face Attendance System Metrics</h1>
+    <div class="sub">Liveness (Anti-Spoof) + Verification against claimed ID. Unauthorized rejections do not reduce Accuracy.</div>
+  </div>
+</header>
+
+<section class="grid cols-4" id="kpis">
+  <div class="card kpi">
+    <div>
+      <div class="label">Accuracy</div>
+      <div class="value green" id="kpi-accuracy">—</div>
+    </div>
+    <div class="muted">TA + TR / All</div>
+  </div>
+  <div class="card kpi">
+    <div>
+      <div class="label">False Accept Rate (FAR)</div>
+      <div class="value red" id="kpi-far">—</div>
+    </div>
+    <div class="muted">FA / Impostor</div>
+  </div>
+  <div class="card kpi">
+    <div>
+      <div class="label">False Reject Rate (FRR)</div>
+      <div class="value amber" id="kpi-frr">—</div>
+    </div>
+    <div class="muted">FR / Genuine</div>
+  </div>
+  <div class="card kpi">
+    <div>
+      <div class="label">Avg Latency</div>
+      <div class="value blue" id="kpi-latency">—</div>
+    </div>
+    <div class="muted">Last 300 events</div>
+  </div>
+</section>
+
+<section class="grid cols-4" style="margin-top:16px;">
+  <div class="card kpi">
+    <div>
+      <div class="label">Total Attempts</div>
+      <div class="value" id="kpi-total">0</div>
+    </div>
+    <div class="muted">All events</div>
+  </div>
+  <div class="card kpi">
+    <div>
+      <div class="label">Genuine Attempts</div>
+      <div class="value" id="kpi-genuine">0</div>
+    </div>
+    <div class="muted">Verification trials</div>
+  </div>
+  <div class="card kpi">
+    <div>
+      <div class="label">Impostor Attempts</div>
+      <div class="value" id="kpi-impostor">0</div>
+    </div>
+    <div class="muted">Unauthorized trials</div>
+  </div>
+  <div class="card kpi">
+    <div>
+      <div class="label">Unauthorized Rejected</div>
+      <div class="value" id="kpi-unauth-rej">0</div>
+    </div>
+    <div class="muted">reject_true</div>
+  </div>
+</section>
+
+<section class="grid cols-3 charts" style="margin-top:16px;">
+  <div class="card">
+    <h3>Outcomes</h3>
+    <canvas id="barOutcomes" height="200"></canvas>
+    <div class="legend">
+      <div class="item"><span class="dot ta"></span>True Accepts</div>
+      <div class="item"><span class="dot fa"></span>False Accepts</div>
+      <div class="item"><span class="dot tr"></span>True Rejects</div>
+      <div class="item"><span class="dot fr"></span>False Rejects</div>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Latency Over Recent Events</h3>
+    <canvas id="lineLatency" height="200"></canvas>
+  </div>
+  <div class="card">
+    <h3>Distance Histogram</h3>
+    <canvas id="histDistance" height="200"></canvas>
+  </div>
+</section>
+
+<section class="card" style="margin-top:16px;">
+  <h3>Recent Attendance Attempts</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Time (UTC)</th>
+        <th>Event</th>
+        <th>Attempt</th>
+        <th>Claimed</th>
+        <th>Recognized</th>
+        <th>Liveness</th>
+        <th>Distance</th>
+        <th>Live Prob</th>
+        <th>Latency (ms)</th>
+        <th>Reason</th>
+      </tr>
+    </thead>
+    <tbody id="eventsBody">
+      <tr><td colspan="10" class="muted">Loading...</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<script>
+  function pct(x){
+    const v = Math.max(0, Math.min(1, Number(x)||0));
+    return (v*100).toFixed(2) + '%';
+  }
+  function tsLabel(iso){
+    try{ return new Date(iso).toISOString().replace('T',' ').replace('Z',''); }catch{ return iso || ''; }
+  }
+
+  async function loadMetrics(){
+    const res = await fetch('/metrics-data');
+    const data = await res.json();
+
+    const rates = data.rates || {};
+    const counts = data.counts || {};
+    const totals = data.totals || {};
+    const recent = data.recent || [];
+    const avgLatency = typeof data.avg_latency_ms === 'number' ? data.avg_latency_ms.toFixed(1) + ' ms' : '—';
+
+    // KPIs
+    document.getElementById('kpi-accuracy').textContent = pct(rates.accuracy ?? 0);
+    document.getElementById('kpi-far').textContent = pct(rates.FAR ?? 0);
+    document.getElementById('kpi-frr').textContent = pct(rates.FRR ?? 0);
+    document.getElementById('kpi-latency').textContent = avgLatency;
+
+    document.getElementById('kpi-total').textContent = totals.totalAttempts ?? 0;
+    document.getElementById('kpi-genuine').textContent = counts.genuineAttempts ?? 0;
+    document.getElementById('kpi-impostor').textContent = counts.impostorAttempts ?? 0;
+    document.getElementById('kpi-unauth-rej').textContent = counts.unauthorizedRejected ?? 0;
+
+    // Outcomes bar chart
+    const barCtx = document.getElementById('barOutcomes').getContext('2d');
+    new Chart(barCtx, {
+      type: 'bar',
+      data: {
+        labels: ['True Accepts', 'False Accepts', 'True Rejects', 'False Rejects'],
+        datasets: [{
+          label: 'Count',
+          data: [
+            counts.trueAccepts || 0,
+            counts.falseAccepts || 0,
+            counts.trueRejects || 0,
+            counts.falseRejects || 0
+          ],
+          backgroundColor: [ '#10b981', '#ef4444', '#3b82f6', '#f59e0b' ],
+          borderWidth: 0
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { display:false } },
+        scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
+      }
+    });
+
+    // Latency line chart
+    const lineCtx = document.getElementById('lineLatency').getContext('2d');
+    const labels = recent.slice().reverse().map(r => tsLabel(r.ts));
+    const lat = recent.slice().reverse().map(r => (typeof r.latency_ms === 'number' ? r.latency_ms : 0));
+    new Chart(lineCtx, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [{
+          label: 'Latency (ms)',
+          data: lat,
+          borderColor: '#3b82f6',
+          backgroundColor: 'rgba(59,130,246,0.25)',
+          fill: true,
+          tension: 0.25,
+          pointRadius: 0
+        }]
+      },
+      options: { responsive:true, plugins:{ legend:{ display:false } }, scales:{ y:{ beginAtZero:true } } }
+    });
+
+    // Distance histogram
+    const histCtx = document.getElementById('histDistance').getContext('2d');
+    const dists = recent.map(r => r.distance).filter(v => typeof v === 'number' && isFinite(v));
+    if (dists.length){
+      const bins = [0.2,0.3,0.4,0.5,0.6,0.7,1.0,1.5,2.0];
+      const labelsH = bins.map(b => '≤ ' + b.toFixed(1));
+      const countsH = Array(bins.length).fill(0);
+      for (const v of dists){
+        const idx = bins.findIndex(b => v <= b);
+        countsH[idx >= 0 ? idx : (countsH.length - 1)] += 1;
+      }
+      new Chart(histCtx, {
+        type:'bar',
+        data:{ labels: labelsH, datasets:[{ label:'Distance', data:countsH, backgroundColor:'#8b5cf6' }] },
+        options:{ responsive:true, plugins:{ legend:{ display:false } }, scales:{ y:{ beginAtZero:true } } }
+      });
+    } else {
+      new Chart(histCtx, { type:'bar', data:{ labels:[], datasets:[] }, options:{ plugins:{legend:{display:false}} } });
+    }
+
+    // Recent table
+    const tbody = document.getElementById('eventsBody');
+    tbody.innerHTML = '';
+    if (!recent.length){
+      const tr = document.createElement('tr'); const td = document.createElement('td');
+      td.colSpan = 10; td.className = 'muted'; td.textContent = 'No events yet.'; tr.appendChild(td); tbody.appendChild(tr);
+    } else {
+      for (const r of recent){
+        const tr = document.createElement('tr');
+        const e = (r.event || '').toLowerCase();
+        const pill = `<span class="pill ${e}">${r.event || '—'}</span>`;
+        const cells = [
+          r.ts ? new Date(r.ts).toISOString().replace('T',' ').replace('Z','') : '—',
+          pill,
+          `<span class="pill">${r.attempt_type || '—'}</span>`,
+          r.claimed_id || '—',
+          r.recognized_id || '—',
+          r.liveness_pass === true ? 'PASS' : (r.liveness_pass === false ? 'FAIL' : '—'),
+          (typeof r.distance === 'number' ? r.distance.toFixed(3) : '—'),
+          (typeof r.live_prob === 'number' ? r.live_prob.toFixed(2) : '—'),
+          (typeof r.latency_ms === 'number' ? r.latency_ms.toFixed(1) : '—'),
+          r.reason || '—'
+        ];
+        cells.forEach((val, idx) => {
+          const td = document.createElement('td');
+          if (idx === 1 || idx === 2) {
+            td.innerHTML = val;
+          } else {
+            td.textContent = val;
+            if (idx === 5) {
+              if (r.liveness_pass === true) td.style.color = 'var(--green)';
+              if (r.liveness_pass === false) td.style.color = 'var(--red)';
+            }
+          }
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      }
+    }
+  }
+
+  if (!('Chart' in window)){ window.addEventListener('load', loadMetrics); } else { loadMetrics(); }
+  setInterval(loadMetrics, 10000);
+</script>
+</body>
+</html>

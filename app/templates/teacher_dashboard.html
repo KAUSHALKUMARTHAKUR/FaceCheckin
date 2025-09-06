@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Teacher Dashboard - Face Recognition Attendance System</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --primary: #3b82f6;
+            --primary-dark: #2563eb;
+            --secondary: #60a5fa;
+            --accent: #10b981;
+            --bg-dark: #111111;
+            --bg-dark-2: #1a1a1a;
+            --bg-dark-3: #222222;
+            --text-light: #f8fafc;
+            --text-gray: #94a3b8;
+            --text-gray-lighter: #cbd5e1;
+            --card-bg: #1e1e1e;
+            --card-border: #333333;
+            --shadow-md: 0 4px 6px rgba(0,0,0,0.5);
+            --shadow-glow: 0 0 15px rgba(59,130,246,0.5);
+        }
+        * {margin:0;padding:0;box-sizing:border-box;font-family:'Inter','Segoe UI',Roboto,Arial,sans-serif;}
+        body {
+            background-color: var(--bg-dark);
+            color: var(--text-light);
+            line-height: 1.6;
+        }
+        .container {
+            width: 100%;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+        .header {
+            background-color: rgba(0,0,0,0.7);
+            backdrop-filter: blur(10px);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+        .header-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            height: 70px;
+        }
+        .logo {
+            display: flex;
+            align-items: center;
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--primary);
+            text-decoration: none;
+            transition: all 0.3s;
+        }
+        .logo i {margin-right:10px;}
+        .logo:hover {color: var(--secondary);text-shadow: 0 0 10px rgba(59,130,246,0.6);}
+        .nav-links {
+            display: flex;
+            list-style: none;
+        }
+        .nav-links li {margin-left: 30px;}
+        .nav-links a {
+            color: var(--text-light);
+            text-decoration: none;
+            font-weight: 500;
+            font-size: 1rem;
+            transition: all 0.3s;
+            position: relative;
+            padding: 5px 0;
+        }
+        .nav-links a:hover {color: var(--primary);}
+        .nav-links a::after {
+            content: '';
+            position: absolute;
+            bottom: -2px; left: 0; width: 0; height: 2px;
+            background-color: var(--primary);
+            transition: width 0.3s, box-shadow 0.3s;
+        }
+        .nav-links a:hover::after {width: 100%;box-shadow: 0 0 5px var(--primary);}
+        .dashboard-section {
+            padding: 60px 0 30px 0;
+            min-height: 90vh;
+            position: relative;
+            overflow: hidden;
+        }
+        .dashboard-section::before {
+            content: '';
+            position: absolute;
+            width: 600px; height: 600px;
+            background: radial-gradient(circle, rgba(59,130,246,0.05), transparent 70%);
+            top: -300px; right: -300px; border-radius: 50%; z-index: 0;
+        }
+        .dashboard-container {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 0 20px;
+            position: relative;
+            z-index: 2;
+        }
+        .dashboard-title {
+            text-align: center;
+            font-size: 2.2rem;
+            font-weight: 700;
+            margin-bottom: 40px;
+            color: var(--text-light);
+            position: relative;
+        }
+        .dashboard-title::after {
+            content: '';
+            display: block;
+            width: 80px;
+            height: 3px;
+            background: linear-gradient(90deg, var(--primary), transparent);
+            margin: 15px auto 0;
+        }
+        .profile-card {
+            background-color: var(--card-bg);
+            border-radius: 16px;
+            padding: 32px 24px;
+            box-shadow: var(--shadow-md);
+            border: 1px solid var(--card-border);
+            display: flex;
+            align-items: center;
+            gap: 24px;
+            margin-bottom: 32px;
+        }
+        .profile-avatar {
+            width: 90px;
+            height: 90px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--primary) 40%, var(--secondary) 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            box-shadow: var(--shadow-glow);
+        }
+        .profile-avatar img {
+            width: 82px;
+            height: 82px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 3px solid #fff;
+        }
+        .profile-avatar i {
+            color: var(--bg-dark-3);
+            font-size: 2.7rem;
+        }
+        .profile-info {
+            flex: 1;
+        }
+        .profile-info h2 {
+            font-size: 1.4rem;
+            font-weight: 700;
+            color: var(--primary);
+            margin-bottom: 6px;
+        }
+        .profile-info p {
+            color: var(--text-gray);
+            font-size: 1rem;
+            margin-bottom: 2px;
+        }
+        .dashboard-actions {
+            margin-bottom: 32px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+        }
+        .dashboard-actions .btn {
+            padding: 10px 22px;
+            font-size: 1rem;
+            border-radius: 8px;
+            font-weight: 600;
+            background: var(--primary);
+            color: var(--text-light);
+            border: none;
+            transition: background 0.2s, transform 0.2s;
+            box-shadow: 0 2px 8px rgba(59,130,246,0.12);
+            cursor: pointer;
+        }
+        .dashboard-actions .btn:hover {
+            background: var(--primary-dark);
+            transform: translateY(-2px);
+        }
+        .dashboard-table-section {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 30px 20px;
+            box-shadow: var(--shadow-md);
+            border: 1px solid var(--card-border);
+        }
+        .dashboard-table-section h3 {
+            color: var(--primary);
+            margin-bottom: 18px;
+            font-size: 1.2rem;
+            font-weight: 700;
+        }
+        .dashboard-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: var(--card-bg);
+            border-radius: 10px;
+            overflow: hidden;
+            font-size: 1.05rem;
+        }
+        .dashboard-table th, .dashboard-table td {
+            padding: 0.7rem 1rem;
+            border-bottom: 1px solid var(--card-border);
+            text-align: left;
+        }
+        .dashboard-table th {
+            background: rgba(59,130,246,0.10);
+            color: var(--primary);
+            font-weight: 700;
+        }
+        .dashboard-table tr:last-child td {
+            border-bottom: none;
+        }
+        .status-present {
+            color: var(--accent);
+            font-weight: 700;
+        }
+        .status-absent {
+            color: var(--danger);
+            font-weight: 700;
+        }
+        @media (max-width: 900px) {
+            .profile-card {flex-direction: column;align-items: flex-start;}
+            .dashboard-table-section {padding: 20px 5px;}
+        }
+        @media (max-width: 600px) {
+            .dashboard-section {padding: 20px 0;}
+            .dashboard-title {font-size: 1.4rem;}
+            .dashboard-container {padding: 0 4px;}
+            .profile-card {padding: 20px 10px;}
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="container header-content">
+            <a href="/" class="logo"><i class="fas fa-user-check"></i> Face Attendance System</a>
+            <ul class="nav-links">
+                <li><a href="/">Home</a></li>
+                <li><a href="/teacher_dashboard.html" class="active">Dashboard</a></li>
+                <li><a href="/logout">Logout</a></li>
+            </ul>
+        </div>
+    </header>
+
+    <!-- Teacher Dashboard Section -->
+    <section class="dashboard-section">
+        <div class="dashboard-container">
+            <h2 class="dashboard-title">Welcome, {{ teacher.name }}!</h2>
+
+            <!-- Profile Card -->
+            <div class="profile-card">
+                <div class="profile-avatar">
+                    {% if teacher.profile_image_url %}
+                        <img src="{{ teacher.profile_image_url }}" alt="Profile Image">
+                    {% else %}
+                        <i class="fas fa-user-tie"></i>
+                    {% endif %}
+                </div>
+                <div class="profile-info">
+                    <h2>{{ teacher.name }}</h2>
+                    <p><strong>Email:</strong> {{ teacher.email }}</p>
+                    <p><strong>Department:</strong> {{ teacher.department }}</p>
+                    <p><strong>Employee ID:</strong> {{ teacher.employee_id }}</p>
+                </div>
+            </div>
+
+            <!-- Dashboard Actions -->
+            <div class="dashboard-actions">
+                <button class="btn" onclick="window.location.href='/take_attendance'"><i class="fas fa-camera"></i> Take Attendance</button>
+                <button class="btn" onclick="window.location.href='/view_attendance'"><i class="fas fa-list"></i> View Attendance</button>
+                <button class="btn" onclick="window.location.href='/manage_students'"><i class="fas fa-users"></i> Manage Students</button>
+            </div>
+
+            <!-- Attendance Table Section -->
+            <div class="dashboard-table-section">
+                <h3>Recent Attendance Records</h3>
+                {% if attendance_records %}
+                <div class="table-responsive">
+                    <table class="dashboard-table">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Class</th>
+                                <th>Subject</th>
+                                <th>Present</th>
+                                <th>Absent</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for record in attendance_records %}
+                            <tr>
+                                <td>{{ record.date }}</td>
+                                <td>{{ record.class_name }}</td>
+                                <td>{{ record.subject }}</td>
+                                <td class="status-present">{{ record.present_count }}</td>
+                                <td class="status-absent">{{ record.absent_count }}</td>
+                                <td>
+                                    <a href="/attendance_detail/{{ record.id }}" class="btn btn-info" style="padding:6px 12px;font-size:0.95rem;">
+                                        <i class="fas fa-eye"></i> Details
+                                    </a>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <p>No attendance records available yet.</p>
+                {% endif %}
+            </div>
+        </div>
+    </section>
+</body>
+</html>

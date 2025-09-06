@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Face Recognition Attendance System</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* Global Styles */
+        :root {
+            --primary: #3b82f6;
+            --primary-dark: #2563eb;
+            --secondary: #60a5fa;
+            --accent: #10b981;
+            --bg-dark: #111111;
+            --bg-dark-2: #1a1a1a;
+            --bg-dark-3: #222222;
+            --text-light: #f8fafc;
+            --text-gray: #94a3b8;
+            --text-gray-lighter: #cbd5e1;
+            --card-bg: #1e1e1e;
+            --card-border: #333333;
+            --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+            --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.5);
+            --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.5);
+            --shadow-glow: 0 0 15px rgba(59, 130, 246, 0.5);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Inter', 'Segoe UI', Roboto, Arial, sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-dark);
+            color: var(--text-light);
+            line-height: 1.6;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+
+        /* Header Styles */
+        .header {
+            background-color: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .header-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            height: 70px;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--primary);
+            text-decoration: none;
+            transition: all 0.3s;
+        }
+
+        .logo i {
+            margin-right: 10px;
+        }
+
+        .logo:hover {
+            color: var(--secondary);
+            text-shadow: 0 0 10px rgba(59, 130, 246, 0.6);
+        }
+
+        .nav-links {
+            display: flex;
+            list-style: none;
+        }
+
+        .nav-links li {
+            margin-left: 30px;
+        }
+
+        .nav-links a {
+            color: var(--text-light);
+            text-decoration: none;
+            font-weight: 500;
+            font-size: 1rem;
+            transition: all 0.3s;
+            position: relative;
+            padding: 5px 0;
+        }
+
+        .nav-links a:hover {
+            color: var(--primary);
+        }
+
+        .nav-links a::after {
+            content: '';
+            position: absolute;
+            bottom: -2px;
+            left: 0;
+            width: 0;
+            height: 2px;
+            background-color: var(--primary);
+            transition: width 0.3s, box-shadow 0.3s;
+        }
+
+        .nav-links a:hover::after {
+            width: 100%;
+            box-shadow: 0 0 5px var(--primary);
+        }
+
+        .mobile-menu-btn {
+            display: none;
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            color: var(--text-light);
+            cursor: pointer;
+        }
+
+        /* Login Section */
+        .login-section {
+            padding: 80px 0;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .login-section::before {
+            content: '';
+            position: absolute;
+            width: 600px;
+            height: 600px;
+            background: radial-gradient(circle, rgba(59, 130, 246, 0.05), transparent 70%);
+            top: -300px;
+            right: -300px;
+            border-radius: 50%;
+            z-index: 0;
+        }
+
+        .login-container {
+            max-width: 500px;
+            margin: 0 auto;
+            padding: 0 20px;
+            position: relative;
+            z-index: 2;
+        }
+
+        .section-title {
+            text-align: center;
+            font-size: 2.2rem;
+            font-weight: 700;
+            margin-bottom: 40px;
+            color: var(--text-light);
+            position: relative;
+        }
+
+        .section-title::after {
+            content: '';
+            display: block;
+            width: 80px;
+            height: 3px;
+            background: linear-gradient(90deg, var(--primary), transparent);
+            margin: 15px auto 0;
+        }
+
+        .login-options {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 30px;
+            position: relative;
+            z-index: 2;
+        }
+
+        .login-option {
+            padding: 12px 24px;
+            background-color: var(--card-bg);
+            color: var(--text-gray);
+            border: 1px solid var(--card-border);
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+
+        .login-option:first-child {
+            border-radius: 8px 0 0 8px;
+        }
+
+        .login-option:nth-child(2) {
+            border-radius: 0;
+            border-left: none;
+            border-right: none;
+        }
+
+        .login-option:last-child {
+            border-radius: 0 8px 8px 0;
+        }
+
+        .login-option.active {
+            background-color: var(--primary);
+            color: var(--text-light);
+            border-color: var(--primary);
+            box-shadow: var(--shadow-glow);
+        }
+
+        .login-card {
+            background-color: var(--card-bg);
+            border-radius: 12px;
+            padding: 40px;
+            box-shadow: var(--shadow-md);
+            border: 1px solid var(--card-border);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .login-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 3px;
+            background: linear-gradient(90deg, var(--primary), transparent);
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-label {
+            display: block;
+            margin-bottom: 8px;
+            color: var(--text-gray-lighter);
+            font-weight: 500;
+        }
+
+        .form-control {
+            width: 100%;
+            padding: 12px 16px;
+            background-color: var(--bg-dark-3);
+            border: 1px solid var(--card-border);
+            border-radius: 8px;
+            color: var(--text-light);
+            font-size: 1rem;
+            transition: all 0.3s;
+        }
+
+        .form-control:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+        }
+
+        .form-select {
+            width: 100%;
+            padding: 12px 16px;
+            background-color: var(--bg-dark-3);
+            border: 1px solid var(--card-border);
+            border-radius: 8px;
+            color: var(--text-light);
+            font-size: 1rem;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%23cbd5e1' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14L2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 16px center;
+            background-size: 16px 12px;
+        }
+
+        .form-select:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+        }
+
+        .camera-container {
+            width: 100%;
+            height: 300px;
+            background-color: var(--bg-dark-3);
+            border-radius: 8px;
+            overflow: hidden;
+            position: relative;
+            margin-bottom: 20px;
+            border: 1px solid var(--card-border);
+        }
+
+        .camera-feed {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .camera-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(16, 185, 129, 0.2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--text-light);
+        }
+
+        .camera-buttons {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 12px 28px;
+            font-size: 1rem;
+            font-weight: 600;
+            border-radius: 8px;
+            text-decoration: none;
+            transition: all 0.3s;
+            cursor: pointer;
+            position: relative;
+            overflow: hidden;
+            z-index: 1;
+            border: none;
+        }
+
+        .btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 0;
+            height: 100%;
+            background: rgba(255, 255, 255, 0.1);
+            transition: width 0.3s ease;
+            z-index: -1;
+        }
+
+        .btn:hover::before {
+            width: 100%;
+        }
+
+        .btn-primary {
+            background-color: var(--primary);
+            color: var(--text-light);
+            box-shadow: 0 0 10px rgba(59, 130, 246, 0.3);
+        }
+
+        .btn-primary:hover {
+            background-color: var(--primary-dark);
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(59, 130, 246, 0.4);
+        }
+
+        .btn-info {
+            background-color: var(--secondary);
+            color: var(--text-light);
+        }
+
+        .btn-info:hover {
+            background-color: #4a96f8;
+            transform: translateY(-2px);
+        }
+
+        .btn-warning {
+            background-color: #f59e0b;
+            color: var(--text-light);
+        }
+
+        .btn-warning:hover {
+            background-color: #d97706;
+            transform: translateY(-2px);
+        }
+
+        .btn-success {
+            background-color: var(--accent);
+            color: var(--text-light);
+        }
+
+        .btn-success:hover {
+            background-color: #059669;
+            transform: translateY(-2px);
+        }
+
+        .btn-block {
+            display: block;
+            width: 100%;
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .btn:disabled:hover {
+            transform: none;
+            box-shadow: none;
+        }
+
+        .text-center {
+            text-align: center;
+        }
+
+        .mt-3 {
+            margin-top: 15px;
+        }
+
+        .mt-4 {
+            margin-top: 20px;
+        }
+
+        .d-none {
+            display: none;
+        }
+
+        .alert {
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .alert-danger {
+            background-color: rgba(220, 38, 38, 0.1);
+            color: #ef4444;
+            border: 1px solid rgba(220, 38, 38, 0.2);
+        }
+
+        .alert-success {
+            background-color: rgba(16, 185, 129, 0.1);
+            color: #10b981;
+            border: 1px solid rgba(16, 185, 129, 0.2);
+        }
+
+        /* Responsive Styles */
+        @media screen and (max-width: 768px) {
+            .nav-links {
+                display: none;
+                position: absolute;
+                top: 70px;
+                left: 0;
+                right: 0;
+                background-color: rgba(0, 0, 0, 0.95);
+                flex-direction: column;
+                box-shadow: var(--shadow-md);
+                padding: 20px 0;
+                z-index: 10;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+                backdrop-filter: blur(10px);
+                -webkit-backdrop-filter: blur(10px);
+            }
+
+            .nav-links.active {
+                display: flex;
+            }
+
+            .nav-links li {
+                margin: 0;
+                text-align: center;
+                padding: 15px 0;
+            }
+
+            .mobile-menu-btn {
+                display: block;
+            }
+
+            .login-card {
+                padding: 30px 20px;
+            }
+
+            .login-options {
+                flex-direction: column;
+                align-items: center;
+                gap: 10px;
+            }
+
+            .login-option {
+                width: 100%;
+                text-align: center;
+                border-radius: 8px !important;
+            }
+
+            .login-option:nth-child(2) {
+                border-left: 1px solid var(--card-border);
+                border-right: 1px solid var(--card-border);
+            }
+
+            .camera-buttons {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="container header-content">
+            <a href="/" class="logo"><i class="fas fa-user-check"></i> Face Attendance System</a>
+            <ul class="nav-links">
+                <li><a href="/">Home</a></li>
+                <li><a href="/login.html">Login</a></li>
+                <li><a href="/register.html">Register</a></li>
+            </ul>
+            <button class="mobile-menu-btn">
+                <i class="fas fa-bars"></i>
+            </button>
+        </div>
+    </header>
+
+    <!-- Login Section -->
+    <section class="login-section">
+        <div class="login-container">
+            <h2 class="section-title">Welcome Back</h2>
+            
+            <div class="login-card">
+                <!-- Flash Messages -->
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                        {% for category, message in messages %}
+                            <div class="alert alert-{{ category }}">
+                                {{ message }}
+                            </div>
+                        {% endfor %}
+                    {% endif %}
+                {% endwith %}
+                
+                <!-- Login Options -->
+                <div class="login-options">
+                    <div class="login-option active" id="studentOption">Student Login</div>
+                    <div class="login-option" id="teacherOption">Teacher Login</div>
+                    <div class="login-option" id="faceOption">Face Login</div>
+                </div>
+                
+                <!-- Student Login Form -->
+                <form id="studentLoginForm" method="POST" action="/login">
+                    <div class="form-group">
+                        <label for="student_id" class="form-label">Student ID</label>
+                        <input type="text" class="form-control" id="student_id" name="student_id" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="student_password" class="form-label">Password</label>
+                        <input type="password" class="form-control" id="student_password" name="password" required>
+                    </div>
+                    <div class="form-group mt-4">
+                        <button type="submit" class="btn btn-primary btn-block">Login</button>
+                    </div>
+                </form>
+                
+                <!-- Teacher Login Form -->
+                <form id="teacherLoginForm" method="POST" action="/teacher_login" class="d-none">
+                    <div class="form-group">
+                        <label for="teacher_id" class="form-label">Teacher ID</label>
+                        <input type="text" class="form-control" id="teacher_id" name="teacher_id" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="teacher_password" class="form-label">Password</label>
+                        <input type="password" class="form-control" id="teacher_password" name="password" required>
+                    </div>
+                    <div class="form-group mt-4">
+                        <button type="submit" class="btn btn-primary btn-block">Login</button>
+                    </div>
+                </form>
+                
+                <!-- Face Login Form -->
+                <form id="faceLoginForm" method="POST" action="/face-login" class="d-none">
+                    <div class="form-group">
+                        <label for="face_role" class="form-label">Login As</label>
+                        <select class="form-select" id="face_role" name="face_role" required>
+                            <option value="student">Student</option>
+                            <option value="teacher">Teacher</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <div class="text-center">
+                            <div class="camera-container" id="cameraContainer">
+                                <video id="video" class="camera-feed" autoplay></video>
+                                <canvas id="canvas" class="d-none"></canvas>
+                                <div id="cameraOverlay" class="camera-overlay d-none">
+                                    Face Captured
+                                </div>
+                            </div>
+                            <div class="camera-buttons">
+                                <button type="button" id="startCamera" class="btn btn-info">Start Camera</button>
+                                <button type="button" id="captureImage" class="btn btn-primary d-none">Capture Image</button>
+                                <button type="button" id="retakeImage" class="btn btn-warning d-none">Retake</button>
+                            </div>
+                            <input type="hidden" id="face_image" name="face_image">
+                        </div>
+                    </div>
+                    <div class="form-group mt-4">
+                        <button type="submit" class="btn btn-success btn-block" id="faceLoginBtn" disabled>Login with Face</button>
+                    </div>
+                </form>
+                
+                <div class="text-center mt-3">
+                    <p>Don't have an account? <a href="/register.html" style="color: var(--primary); text-decoration: none;">Register here</a></p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- JavaScript -->
+    <script src="{{ url_for('static', filename='js/camera.js') }}"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Mobile menu toggle
+            const mobileMenuBtn = document.querySelector('.mobile-menu-btn');
+            const navLinks = document.querySelector('.nav-links');
+            
+            if (mobileMenuBtn) {
+                mobileMenuBtn.addEventListener('click', function() {
+                    navLinks.classList.toggle('active');
+                });
+            }
+
+            // Tab switching logic
+            const studentOption = document.getElementById('studentOption');
+            const teacherOption = document.getElementById('teacherOption');
+            const faceOption = document.getElementById('faceOption');
+            const studentLoginForm = document.getElementById('studentLoginForm');
+            const teacherLoginForm = document.getElementById('teacherLoginForm');
+            const faceLoginForm = document.getElementById('faceLoginForm');
+
+            studentOption.addEventListener('click', function() {
+                studentOption.classList.add('active');
+                teacherOption.classList.remove('active');
+                faceOption.classList.remove('active');
+                studentLoginForm.classList.remove('d-none');
+                teacherLoginForm.classList.add('d-none');
+                faceLoginForm.classList.add('d-none');
+            });
+            
+            teacherOption.addEventListener('click', function() {
+                teacherOption.classList.add('active');
+                studentOption.classList.remove('active');
+                faceOption.classList.remove('active');
+                teacherLoginForm.classList.remove('d-none');
+                studentLoginForm.classList.add('d-none');
+                faceLoginForm.classList.add('d-none');
+            });
+            
+            faceOption.addEventListener('click', function() {
+                faceOption.classList.add('active');
+                studentOption.classList.remove('active');
+                teacherOption.classList.remove('active');
+                faceLoginForm.classList.remove('d-none');
+                studentLoginForm.classList.add('d-none');
+                teacherLoginForm.classList.add('d-none');
+            });
+        });
+    </script>
+</body>
+</html>

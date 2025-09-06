@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Mark Attendance</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/face-api.js"></script>
+    <script defer src="/static/js/camera.js"></script>
+    <style>
+        video, canvas {
+            border: 2px solid #4caf50;
+            border-radius: 10px;
+        }
+        .camera-container {
+            position: relative;
+            width: 320px;
+            margin: 0 auto;
+        }
+        .camera-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 320px;
+            height: 240px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: white;
+            background: rgba(0, 0, 0, 0.5);
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="container header-content">
+            <a href="/" class="logo">📸 Face Attendance</a>
+            <ul class="nav-links">
+                <li><a href="/">Home</a></li>
+                <li><a href="/dashboard">Dashboard</a></li>
+                <li><a href="/logout">Logout</a></li>
+            </ul>
+        </div>
+    </header>
+
+    <section class="attendance-section">
+        <div class="container">
+            <h2 class="section-title">Welcome, {{ student.name }}</h2>
+            <p>Select course and scan face to mark your attendance.</p>
+
+            <form id="attendanceForm">
+                <input type="hidden" name="student_id" id="student_id" value="{{ student.student_id }}">
+                
+                <label for="program">Program:</label>
+                <input type="text" id="program" name="program" required>
+
+                <label for="semester">Semester:</label>
+                <input type="text" id="semester" name="semester" required>
+
+                <label for="course">Course:</label>
+                <input type="text" id="course" name="course" required>
+
+                <!-- Camera UI -->
+                <div class="camera-container" id="cameraContainer">
+                    <video id="video" width="320" height="240" autoplay muted playsinline></video>
+                    <canvas id="overlay" width="320" height="240"></canvas>
+                    <div id="cameraOverlay" class="camera-overlay d-none">Face Captured</div>
+                </div>
+
+                <div class="camera-buttons">
+                    <button type="button" id="startCamera" class="btn btn-info">Start Camera</button>
+                    <button type="button" id="captureImage" class="btn btn-primary d-none">Capture</button>
+                    <button type="button" id="retakeImage" class="btn btn-warning d-none">Retake</button>
+                </div>
+
+                <input type="hidden" id="face_image" name="face_image">
+
+                <button type="submit" class="btn btn-success" id="submitBtn" disabled>Mark Attendance</button>
+            </form>
+
+            <div id="responseMessage" class="mt-3"></div>
+        </div>
+    </section>
+
+    <script>
+        document.getElementById("attendanceForm").addEventListener("submit", async (e) => {
+            e.preventDefault();
+
+            const data = {
+                student_id: document.getElementById("student_id").value,
+                program: document.getElementById("program").value,
+                semester: document.getElementById("semester").value,
+                course: document.getElementById("course").value,
+                face_image: document.getElementById("face_image").value
+            };
+
+            const response = await fetch("/mark-attendance", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(data)
+            });
+
+            const result = await response.json();
+            const msgBox = document.getElementById("responseMessage");
+
+            msgBox.innerText = result.message;
+            msgBox.style.color = result.success ? "green" : "red";
+        });
+    </script>
+</body>
+</html>

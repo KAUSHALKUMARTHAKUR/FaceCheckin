@@ -1,0 +1,840 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Register - Face Recognition Attendance System</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* Global Styles */
+        :root {
+            --primary: #3b82f6;
+            --primary-dark: #2563eb;
+            --secondary: #60a5fa;
+            --accent: #10b981;
+            --bg-dark: #111111;
+            --bg-dark-2: #1a1a1a;
+            --bg-dark-3: #222222;
+            --text-light: #f8fafc;
+            --text-gray: #94a3b8;
+            --text-gray-lighter: #cbd5e1;
+            --card-bg: #1e1e1e;
+            --card-border: #333333;
+            --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+            --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.5);
+            --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.5);
+            --shadow-glow: 0 0 15px rgba(59, 130, 246, 0.5);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Inter', 'Segoe UI', Roboto, Arial, sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-dark);
+            color: var(--text-light);
+            line-height: 1.6;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+
+        /* Header Styles */
+        .header {
+            background-color: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .header-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            height: 70px;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--primary);
+            text-decoration: none;
+            transition: all 0.3s;
+        }
+
+        .logo i {
+            margin-right: 10px;
+        }
+
+        .logo:hover {
+            color: var(--secondary);
+            text-shadow: 0 0 10px rgba(59, 130, 246, 0.6);
+        }
+
+        .nav-links {
+            display: flex;
+            list-style: none;
+        }
+
+        .nav-links li {
+            margin-left: 30px;
+        }
+
+        .nav-links a {
+            color: var(--text-light);
+            text-decoration: none;
+            font-weight: 500;
+            font-size: 1rem;
+            transition: all 0.3s;
+            position: relative;
+            padding: 5px 0;
+        }
+
+        .nav-links a:hover {
+            color: var(--primary);
+        }
+
+        .nav-links a::after {
+            content: '';
+            position: absolute;
+            bottom: -2px;
+            left: 0;
+            width: 0;
+            height: 2px;
+            background-color: var(--primary);
+            transition: width 0.3s, box-shadow 0.3s;
+        }
+
+        .nav-links a:hover::after {
+            width: 100%;
+            box-shadow: 0 0 5px var(--primary);
+        }
+
+        .mobile-menu-btn {
+            display: none;
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            color: var(--text-light);
+            cursor: pointer;
+        }
+
+        /* Registration Section */
+        .registration-section {
+            padding: 80px 0;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .registration-section::before {
+            content: '';
+            position: absolute;
+            width: 600px;
+            height: 600px;
+            background: radial-gradient(circle, rgba(59, 130, 246, 0.05), transparent 70%);
+            top: -300px;
+            right: -300px;
+            border-radius: 50%;
+            z-index: 0;
+        }
+
+        .registration-container {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 0 20px;
+            position: relative;
+            z-index: 2;
+        }
+
+        .section-title {
+            text-align: center;
+            font-size: 2.2rem;
+            font-weight: 700;
+            margin-bottom: 40px;
+            color: var(--text-light);
+            position: relative;
+        }
+
+        .section-title::after {
+            content: '';
+            display: block;
+            width: 80px;
+            height: 3px;
+            background: linear-gradient(90deg, var(--primary), transparent);
+            margin: 15px auto 0;
+        }
+
+        .registration-options {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 30px;
+            position: relative;
+            z-index: 2;
+        }
+
+        .register-option {
+            padding: 12px 24px;
+            background-color: var(--card-bg);
+            color: var(--text-gray);
+            border: 1px solid var(--card-border);
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+
+        .register-option:first-child {
+            border-radius: 8px 0 0 8px;
+        }
+
+        .register-option:last-child {
+            border-radius: 0 8px 8px 0;
+        }
+
+        .register-option.active {
+            background-color: var(--primary);
+            color: var(--text-light);
+            border-color: var(--primary);
+            box-shadow: var(--shadow-glow);
+        }
+
+        .registration-card {
+            background-color: var(--card-bg);
+            border-radius: 12px;
+            padding: 40px;
+            box-shadow: var(--shadow-md);
+            border: 1px solid var(--card-border);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .registration-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 3px;
+            background: linear-gradient(90deg, var(--primary), transparent);
+        }
+
+        .form-row {
+            display: flex;
+            flex-wrap: wrap;
+            margin: 0 -15px;
+        }
+
+        .form-column {
+            flex: 1;
+            padding: 0 15px;
+            min-width: 280px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-label {
+            display: block;
+            margin-bottom: 8px;
+            color: var(--text-gray-lighter);
+            font-weight: 500;
+        }
+
+        .form-control {
+            width: 100%;
+            padding: 12px 16px;
+            background-color: var(--bg-dark-3);
+            border: 1px solid var(--card-border);
+            border-radius: 8px;
+            color: var(--text-light);
+            font-size: 1rem;
+            transition: all 0.3s;
+        }
+
+        .form-control:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+        }
+
+        .form-select {
+            width: 100%;
+            padding: 12px 16px;
+            background-color: var(--bg-dark-3);
+            border: 1px solid var(--card-border);
+            border-radius: 8px;
+            color: var(--text-light);
+            font-size: 1rem;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%23cbd5e1' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14L2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 16px center;
+            background-size: 16px 12px;
+        }
+
+        .form-select:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+        }
+
+        .camera-section {
+            margin-top: 30px;
+            border-top: 1px solid var(--card-border);
+            padding-top: 30px;
+        }
+
+        .camera-container {
+            width: 100%;
+            height: 300px;
+            background-color: var(--bg-dark-3);
+            border-radius: 8px;
+            overflow: hidden;
+            position: relative;
+            margin-bottom: 20px;
+            border: 1px solid var(--card-border);
+        }
+
+        .camera-feed {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .camera-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(16, 185, 129, 0.2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--text-light);
+        }
+
+        .camera-buttons {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 12px 28px;
+            font-size: 1rem;
+            font-weight: 600;
+            border-radius: 8px;
+            text-decoration: none;
+            transition: all 0.3s;
+            cursor: pointer;
+            position: relative;
+            overflow: hidden;
+            z-index: 1;
+            border: none;
+        }
+
+        .btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 0;
+            height: 100%;
+            background: rgba(255, 255, 255, 0.1);
+            transition: width 0.3s ease;
+            z-index: -1;
+        }
+
+        .btn:hover::before {
+            width: 100%;
+        }
+
+        .btn-primary {
+            background-color: var(--primary);
+            color: var(--text-light);
+            box-shadow: 0 0 10px rgba(59, 130, 246, 0.3);
+        }
+
+        .btn-primary:hover {
+            background-color: var(--primary-dark);
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(59, 130, 246, 0.4);
+        }
+
+        .btn-info {
+            background-color: var(--secondary);
+            color: var(--text-light);
+        }
+
+        .btn-info:hover {
+            background-color: #4a96f8;
+            transform: translateY(-2px);
+        }
+
+        .btn-warning {
+            background-color: #f59e0b;
+            color: var(--text-light);
+        }
+
+        .btn-warning:hover {
+            background-color: #d97706;
+            transform: translateY(-2px);
+        }
+
+        .btn-success {
+            background-color: var(--accent);
+            color: var(--text-light);
+        }
+
+        .btn-success:hover {
+            background-color: #059669;
+            transform: translateY(-2px);
+        }
+
+        .btn-block {
+            display: block;
+            width: 100%;
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .btn:disabled:hover {
+            transform: none;
+            box-shadow: none;
+        }
+
+        .text-center {
+            text-align: center;
+        }
+
+        .mt-3 {
+            margin-top: 15px;
+        }
+
+        .mt-4 {
+            margin-top: 20px;
+        }
+
+        .d-none {
+            display: none;
+        }
+
+        .alert {
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .alert-danger {
+            background-color: rgba(220, 38, 38, 0.1);
+            color: #ef4444;
+            border: 1px solid rgba(220, 38, 38, 0.2);
+        }
+
+        .alert-success {
+            background-color: rgba(16, 185, 129, 0.1);
+            color: #10b981;
+            border: 1px solid rgba(16, 185, 129, 0.2);
+        }
+
+        /* Responsive Styles */
+        @media screen and (max-width: 768px) {
+            .nav-links {
+                display: none;
+                position: absolute;
+                top: 70px;
+                left: 0;
+                right: 0;
+                background-color: rgba(0, 0, 0, 0.95);
+                flex-direction: column;
+                box-shadow: var(--shadow-md);
+                padding: 20px 0;
+                z-index: 10;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+                backdrop-filter: blur(10px);
+                -webkit-backdrop-filter: blur(10px);
+            }
+
+            .nav-links.active {
+                display: flex;
+            }
+
+            .nav-links li {
+                margin: 0;
+                text-align: center;
+                padding: 15px 0;
+            }
+
+            .mobile-menu-btn {
+                display: block;
+            }
+
+            .registration-card {
+                padding: 30px 20px;
+            }
+
+            .form-column {
+                flex: 100%;
+                margin-bottom: 10px;
+            }
+
+            .camera-buttons {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="container header-content">
+            <a href="/" class="logo"><i class="fas fa-user-check"></i> Face Attendance System</a>
+            <ul class="nav-links">
+                <li><a href="/">Home</a></li>
+                <li><a href="/login.html">Login</a></li>
+                <li><a href="/register.html">Register</a></li>
+            </ul>
+            <button class="mobile-menu-btn">
+                <i class="fas fa-bars"></i>
+            </button>
+        </div>
+    </header>
+
+    <!-- Registration Section -->
+    <section class="registration-section">
+        <div class="registration-container">
+            <h2 class="section-title">Create Your Account</h2>
+            
+            <!-- Registration Options -->
+            <div class="registration-options">
+                <div class="register-option active" id="studentRegOption">Student Registration</div>
+                <div class="register-option" id="teacherRegOption">Teacher Registration</div>
+            </div>
+
+            <div class="registration-card">
+                <!-- Flash Messages -->
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                        {% for category, message in messages %}
+                            <div class="alert alert-{{ category }}">
+                                {{ message }}
+                            </div>
+                        {% endfor %}
+                    {% endif %}
+                {% endwith %}
+
+                <!-- Student Registration Form -->
+                <form id="studentRegisterForm" method="POST" action="/register" enctype="multipart/form-data">
+                    <div class="form-row">
+                        <div class="form-column">
+                            <div class="form-group">
+                                <label for="student_id" class="form-label">Student ID</label>
+                                <input type="text" class="form-control" id="student_id" name="student_id" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="name" class="form-label">Full Name</label>
+                                <input type="text" class="form-control" id="name" name="name" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="email" class="form-label">Email</label>
+                                <input type="email" class="form-control" id="email" name="email" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="department" class="form-label">Department</label>
+                                <select class="form-select" id="department" name="department" required>
+                                    <option value="">Select Department</option>
+                                    <option value="Computer Science">Computer Science</option>
+                                    <option value="Information Technology">Information Technology</option>
+                                    <option value="Electronics">Electronics</option>
+                                    <option value="Mechanical">Mechanical</option>
+                                    <option value="Civil">Civil</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="course" class="form-label">Course</label>
+                                <input type="text" class="form-control" id="course" name="course" required>
+                            </div>
+                        </div>
+                        <div class="form-column">
+                            <div class="form-group">
+                                <label for="year" class="form-label">Year</label>
+                                <select class="form-select" id="year" name="year" required>
+                                    <option value="">Select Year</option>
+                                    <option value="1">First Year</option>
+                                    <option value="2">Second Year</option>
+                                    <option value="3">Third Year</option>
+                                    <option value="4">Fourth Year</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="division" class="form-label">Division</label>
+                                <input type="text" class="form-control" id="division" name="division" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="mobile" class="form-label">Mobile Number</label>
+                                <input type="tel" class="form-control" id="mobile" name="mobile" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="dob" class="form-label">Date of Birth</label>
+                                <input type="date" class="form-control" id="dob" name="dob" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="gender" class="form-label">Gender</label>
+                                <select class="form-select" id="gender" name="gender" required>
+                                    <option value="">Select Gender</option>
+                                    <option value="Male">Male</option>
+                                    <option value="Female">Female</option>
+                                    <option value="Other">Other</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="form-row">
+                        <div class="form-column">
+                            <div class="form-group">
+                                <label for="student_password" class="form-label">Password</label>
+                                <input type="password" class="form-control" id="student_password" name="password" required>
+                            </div>
+                        </div>
+                        <div class="form-column">
+                            <div class="form-group">
+                                <label for="confirm_password" class="form-label">Confirm Password</label>
+                                <input type="password" class="form-control" id="confirm_password" required>
+                                <div id="passwordError" class="form-text text-danger d-none">Passwords do not match</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Face Registration Section -->
+                    <div class="camera-section">
+                        <h3 class="text-center" style="margin-bottom: 20px;">Face Registration</h3>
+                        <div class="camera-container" id="cameraContainerStudent">
+                            <video id="videoStudent" class="camera-feed" autoplay></video>
+                            <canvas id="canvasStudent" class="d-none"></canvas>
+                            <div id="cameraOverlayStudent" class="camera-overlay d-none">
+                                Face Captured
+                            </div>
+                        </div>
+                        <div class="camera-buttons">
+                            <button type="button" id="startCameraStudent" class="btn btn-info">Start Camera</button>
+                            <button type="button" id="captureImageStudent" class="btn btn-primary d-none">Capture Image</button>
+                            <button type="button" id="retakeImageStudent" class="btn btn-warning d-none">Retake</button>
+                        </div>
+                        <input type="hidden" id="face_image_student" name="face_image">
+                    </div>
+
+                    <div class="form-group mt-4">
+                        <button type="submit" class="btn btn-success btn-block" id="registerBtnStudent" disabled>Register</button>
+                    </div>
+                </form>
+
+                <!-- Teacher Registration Form -->
+                <form id="teacherRegisterForm" method="POST" action="/teacher_register" class="d-none" enctype="multipart/form-data">
+                    <div class="form-row">
+                        <div class="form-column">
+                            <div class="form-group">
+                                <label for="teacher_id" class="form-label">Teacher ID</label>
+                                <input type="text" class="form-control" id="teacher_id" name="teacher_id" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="teacher_name" class="form-label">Full Name</label>
+                                <input type="text" class="form-control" id="teacher_name" name="name" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="teacher_email" class="form-label">Email</label>
+                                <input type="email" class="form-control" id="teacher_email" name="email" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="teacher_department" class="form-label">Department</label>
+                                <select class="form-select" id="teacher_department" name="department" required>
+                                    <option value="">Select Department</option>
+                                    <option value="Computer Science">Computer Science</option>
+                                    <option value="Information Technology">Information Technology</option>
+                                    <option value="Electronics">Electronics</option>
+                                    <option value="Mechanical">Mechanical</option>
+                                    <option value="Civil">Civil</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-column">
+                            <div class="form-group">
+                                <label for="designation" class="form-label">Designation</label>
+                                <select class="form-select" id="designation" name="designation" required>
+                                    <option value="">Select Designation</option>
+                                    <option value="Professor">Professor</option>
+                                    <option value="Associate Professor">Associate Professor</option>
+                                    <option value="Assistant Professor">Assistant Professor</option>
+                                    <option value="Lecturer">Lecturer</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="teacher_mobile" class="form-label">Mobile Number</label>
+                                <input type="tel" class="form-control" id="teacher_mobile" name="mobile" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="teacher_dob" class="form-label">Date of Birth</label>
+                                <input type="date" class="form-control" id="teacher_dob" name="dob" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="teacher_gender" class="form-label">Gender</label>
+                                <select class="form-select" id="teacher_gender" name="gender" required>
+                                    <option value="">Select Gender</option>
+                                    <option value="Male">Male</option>
+                                    <option value="Female">Female</option>
+                                    <option value="Other">Other</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="form-row">
+                        <div class="form-column">
+                            <div class="form-group">
+                                <label for="teacher_password" class="form-label">Password</label>
+                                <input type="password" class="form-control" id="teacher_password" name="password" required>
+                            </div>
+                        </div>
+                        <div class="form-column">
+                            <div class="form-group">
+                                <label for="teacher_confirm_password" class="form-label">Confirm Password</label>
+                                <input type="password" class="form-control" id="teacher_confirm_password" required>
+                                <div id="teacherPasswordError" class="form-text text-danger d-none">Passwords do not match</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Face Registration Section -->
+                    <div class="camera-section">
+                        <h3 class="text-center" style="margin-bottom: 20px;">Face Registration</h3>
+                        <div class="camera-container" id="cameraContainerTeacher">
+                            <video id="videoTeacher" class="camera-feed" autoplay></video>
+                            <canvas id="canvasTeacher" class="d-none"></canvas>
+                            <div id="cameraOverlayTeacher" class="camera-overlay d-none">
+                                Face Captured
+                            </div>
+                        </div>
+                        <div class="camera-buttons">
+                            <button type="button" id="startCameraTeacher" class="btn btn-info">Start Camera</button>
+                            <button type="button" id="captureImageTeacher" class="btn btn-primary d-none">Capture Image</button>
+                            <button type="button" id="retakeImageTeacher" class="btn btn-warning d-none">Retake</button>
+                        </div>
+                        <input type="hidden" id="face_image_teacher" name="face_image">
+                    </div>
+
+                    <div class="form-group mt-4">
+                        <button type="submit" class="btn btn-success btn-block" id="registerBtnTeacher" disabled>Register</button>
+                    </div>
+                </form>
+
+                <div class="text-center mt-3">
+                    <p>Already have an account? <a href="/login.html" style="color: var(--primary); text-decoration: none;">Login here</a></p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- JavaScript -->
+    <script src="{{ url_for('static', filename='js/camera.js') }}"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Mobile menu toggle
+            const mobileMenuBtn = document.querySelector('.mobile-menu-btn');
+            const navLinks = document.querySelector('.nav-links');
+            
+            if (mobileMenuBtn) {
+                mobileMenuBtn.addEventListener('click', function() {
+                    navLinks.classList.toggle('active');
+                });
+            }
+
+            // Tab switching logic
+            const studentRegOption = document.getElementById('studentRegOption');
+            const teacherRegOption = document.getElementById('teacherRegOption');
+            const studentRegisterForm = document.getElementById('studentRegisterForm');
+            const teacherRegisterForm = document.getElementById('teacherRegisterForm');
+
+            studentRegOption.addEventListener('click', function() {
+                studentRegOption.classList.add('active');
+                teacherRegOption.classList.remove('active');
+                studentRegisterForm.classList.remove('d-none');
+                teacherRegisterForm.classList.add('d-none');
+            });
+
+            teacherRegOption.addEventListener('click', function() {
+                teacherRegOption.classList.add('active');
+                studentRegOption.classList.remove('active');
+                teacherRegisterForm.classList.remove('d-none');
+                studentRegisterForm.classList.add('d-none');
+            });
+
+            // Password validation for student
+            const password = document.getElementById('student_password');
+            const confirmPassword = document.getElementById('confirm_password');
+            const passwordError = document.getElementById('passwordError');
+            const registerBtnStudent = document.getElementById('registerBtnStudent');
+
+            function validateStudentPassword() {
+                if (password.value !== confirmPassword.value) {
+                    passwordError.classList.remove('d-none');
+                    registerBtnStudent.disabled = true;
+                } else {
+                    passwordError.classList.add('d-none');
+                    // Only enable if face is captured (handled by camera.js)
+                    if (document.getElementById('face_image_student').value) {
+                        registerBtnStudent.disabled = false;
+                    }
+                }
+            }
+            
+            if (password && confirmPassword) {
+                password.addEventListener('input', validateStudentPassword);
+                confirmPassword.addEventListener('input', validateStudentPassword);
+            }
+
+            // Password validation for teacher
+            const teacherPassword = document.getElementById('teacher_password');
+            const teacherConfirmPassword = document.getElementById('teacher_confirm_password');
+            const teacherPasswordError = document.getElementById('teacherPasswordError');
+            const registerBtnTeacher = document.getElementById('registerBtnTeacher');
+
+            function validateTeacherPassword() {
+                if (teacherPassword.value !== teacherConfirmPassword.value) {
+                    teacherPasswordError.classList.remove('d-none');
+                    registerBtnTeacher.disabled = true;
+                } else {
+                    teacherPasswordError.classList.add('d-none');
+                    // Only enable if face is captured (handled by camera.js)
+                    if (document.getElementById('face_image_teacher').value) {
+                        registerBtnTeacher.disabled = false;
+                    }
+                }
+            }
+            
+            if (teacherPassword && teacherConfirmPassword) {
+                teacherPassword.addEventListener('input', validateTeacherPassword);
+                teacherConfirmPassword.addEventListener('input', validateTeacherPassword);
+            }
+        });
+    </script>
+</body>
+</html>
