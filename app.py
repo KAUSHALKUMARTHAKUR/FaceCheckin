@@ -127,7 +127,7 @@ def setup_models():
     # Model configurations with working URLs
     models_config = {
         'yolov5s-face.onnx': {
-            'drive_id': 'YOUR_YOLO_GOOGLE_DRIVE_FILE_ID',  # Upload your YOLO model here
+            'drive_id': '1sybYq9GGriXN6sY8YV1-RXMeVqYzhDrV',  # Upload your YOLO model here
             'path': 'models/yolov5s-face.onnx',
             'required': True
         },
