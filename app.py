@@ -132,7 +132,7 @@ def setup_models():
             'required': True
         },
         'AntiSpoofing_bin_1.5_128.onnx': {
-            'drive_id': 'YOUR_GOOGLE_DRIVE_FILE_ID',  # Replace with your actual file ID
+            'drive_id': '1nH5G7dAHFE2KlW_H65txc8GDKSB7Zpy4',  # Replace with your actual file ID
             'path': 'models/anti-spoofing/AntiSpoofing_bin_1.5_128.onnx',
             'required': True
         }
