@@ -1,13 +1,7 @@
-FROM ubuntu:20.04
+FROM python:3.9-slim
 
-# Prevent interactive prompts
-ENV DEBIAN_FRONTEND=noninteractive
-
-# Install Python and system dependencies
+# Install system dependencies (removed execstack and ONNX Runtime specific packages)
 RUN apt-get update && apt-get install -y \
-    python3.9 \
-    python3-pip \
-    python3.9-dev \
     libglib2.0-0 \
     libsm6 \
     libxext6 \
@@ -20,19 +14,20 @@ RUN apt-get update && apt-get install -y \
     liblapack-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Create symlink for python
-RUN ln -s /usr/bin/python3.9 /usr/bin/python
-
 WORKDIR /app
 
+# Copy requirements and install Python dependencies
 COPY requirements.txt .
-RUN python -m pip install --upgrade pip
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Copy application code
 COPY . .
 
+# Create models directory if it doesn't exist
 RUN mkdir -p models/anti-spoofing
 
+# Expose port
 EXPOSE 5000
 
+# Start application with gunicorn
 CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--timeout", "120", "app:app"]
