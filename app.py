@@ -119,11 +119,33 @@ else:
 
 # ---------------- OpenCV DNN Implementation (Replaces ONNX Runtime) ----------------
 
+def _letterbox(image, new_shape=(640, 640), color=(114, 114, 114), auto=False, scaleFill=False, scaleup=True):
+    shape = image.shape[:2]  # h, w
+    if isinstance(new_shape, int):
+        new_shape = (new_shape, new_shape)
+    r = min(new_shape[0] / shape[0], new_shape[1] / shape[1])
+    if not scaleup:
+        r = min(r, 1.0)
+    new_unpad = (int(round(shape[1] * r)), int(round(shape[0] * r)))
+    dw, dh = new_shape[1] - new_unpad[0], new_shape[0] - new_unpad[1]
+    if auto:
+        dw, dh = np.mod(dw, 32), np.mod(dh, 32)
+    elif scaleFill:
+        dw, dh = 0.0, 0.0
+        new_unpad = (new_shape[1], new_shape[0])
+        r = new_shape[1] / shape[1], new_shape[0] / shape[0]
+    dw /= 2
+    dh /= 2
+    if shape[::-1] != new_unpad:
+        image = cv2.resize(image, new_unpad, interpolation=cv2.INTER_LINEAR)
+    top, bottom = int(round(dh - 0.1)), int(round(dh + 0.1))
+    left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
+    image = cv2.copyMakeBorder(image, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)
+    return image, r, (left, top)
+
 def _nms(boxes: np.ndarray, scores: np.ndarray, iou_threshold: float):
-    """Non-Maximum Suppression implementation"""
     if len(boxes) == 0:
         return []
-    
     x1 = boxes[:, 0]
     y1 = boxes[:, 1]
     x2 = boxes[:, 2]
@@ -131,7 +153,6 @@ def _nms(boxes: np.ndarray, scores: np.ndarray, iou_threshold: float):
     areas = (x2 - x1) * (y2 - y1)
     order = scores.argsort()[::-1]
     keep = []
-    
     while order.size > 0:
         i = int(order[0])
         keep.append(i)
@@ -149,7 +170,7 @@ def _nms(boxes: np.ndarray, scores: np.ndarray, iou_threshold: float):
         order = order[inds + 1]
     return keep
 
-class YoloV5FaceDetectorOpenCV:
+class YoloV5FaceDetector:
     """YOLOv5 Face Detection using OpenCV DNN (replaces ONNX Runtime)"""
     
     def __init__(self, model_path: str, input_size: int = 640, conf_threshold: float = 0.3, iou_threshold: float = 0.45):
@@ -170,97 +191,83 @@ class YoloV5FaceDetectorOpenCV:
         
         logger.info(f"YOLO Face Detector loaded with OpenCV DNN from {model_path}")
 
+    @staticmethod
+    def _xywh2xyxy(x: np.ndarray) -> np.ndarray:
+        y = np.zeros_like(x)
+        y[:, 0] = x[:, 0] - x[:, 2] / 2
+        y[:, 1] = x[:, 1] - x[:, 3] / 2
+        y[:, 2] = x[:, 0] + x[:, 2] / 2
+        y[:, 3] = x[:, 1] + x[:, 3] / 2
+        return y
+
     def detect(self, image_bgr: np.ndarray, max_det: int = 20):
         """Detect faces in image using OpenCV DNN"""
         try:
             h0, w0 = image_bgr.shape[:2]
+            img, ratio, dwdh = _letterbox(image_bgr, new_shape=(self.input_size, self.input_size))
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            img = img.astype(np.float32) / 255.0
             
-            # Preprocess image
-            blob = cv2.dnn.blobFromImage(
-                image_bgr, 
-                1/255.0, 
-                (self.input_size, self.input_size), 
-                swapRB=True, 
-                crop=False
-            )
+            # Create blob
+            blob = cv2.dnn.blobFromImage(img, 1.0, (self.input_size, self.input_size), swapRB=False)
             
             # Run inference
             self.net.setInput(blob)
-            outputs = self.net.forward()
+            preds = self.net.forward()[0]
             
-            # Post-process outputs
-            return self._process_outputs(outputs, (h0, w0), max_det)
+            if preds.ndim == 3 and preds.shape[0] == 1:
+                preds = preds[0]
+            if preds.ndim != 2:
+                raise RuntimeError(f"Unexpected YOLO output shape: {preds.shape}")
+            
+            num_attrs = preds.shape[1]
+            has_landmarks = num_attrs >= 15
+            boxes_xywh = preds[:, 0:4]
+            
+            if has_landmarks:
+                scores = preds[:, 4]
+            else:
+                obj = preds[:, 4:5]
+                cls_scores = preds[:, 5:]
+                if cls_scores.size == 0:
+                    scores = obj.squeeze(-1)
+                else:
+                    class_conf = cls_scores.max(axis=1, keepdims=True)
+                    scores = (obj * class_conf).squeeze(-1)
+            
+            keep = scores > self.conf_threshold
+            boxes_xywh = boxes_xywh[keep]
+            scores = scores[keep]
+            
+            if boxes_xywh.shape[0] == 0:
+                return []
+            
+            boxes_xyxy = self._xywh2xyxy(boxes_xywh)
+            boxes_xyxy[:, [0, 2]] -= dwdh[0]
+            boxes_xyxy[:, [1, 3]] -= dwdh[1]
+            boxes_xyxy /= ratio
+            boxes_xyxy[:, 0] = np.clip(boxes_xyxy[:, 0], 0, w0 - 1)
+            boxes_xyxy[:, 1] = np.clip(boxes_xyxy[:, 1], 0, h0 - 1)
+            boxes_xyxy[:, 2] = np.clip(boxes_xyxy[:, 2], 0, w0 - 1)
+            boxes_xyxy[:, 3] = np.clip(boxes_xyxy[:, 3], 0, h0 - 1)
+            
+            keep_inds = _nms(boxes_xyxy, scores, self.iou_threshold)
+            if len(keep_inds) > max_det:
+                keep_inds = keep_inds[:max_det]
+            
+            dets = []
+            for i in keep_inds:
+                dets.append({"bbox": boxes_xyxy[i].tolist(), "score": float(scores[i])})
+            return dets
             
         except Exception as e:
             logger.error(f"Error in YOLO detection: {e}")
             return []
 
-    def _process_outputs(self, outputs, img_shape, max_det):
-        """Process YOLO outputs to extract bounding boxes"""
-        h0, w0 = img_shape
-        detections = []
-        
-        for output in outputs:
-            # Handle different output shapes
-            if output.ndim == 3 and output.shape[0] == 1:
-                output = output[0]
-            
-            if output.ndim != 2:
-                continue
-                
-            # Extract boxes and scores
-            num_detections = output.shape[0]
-            
-            for i in range(num_detections):
-                detection = output[i]
-                
-                # Skip if not enough elements
-                if len(detection) < 5:
-                    continue
-                    
-                # Extract confidence
-                confidence = detection[4]
-                
-                if confidence > self.conf_threshold:
-                    # Extract box coordinates (center_x, center_y, width, height)
-                    center_x = detection[0]
-                    center_y = detection[1]
-                    width = detection[2]
-                    height = detection[3]
-                    
-                    # Convert to absolute coordinates
-                    center_x *= w0
-                    center_y *= h0
-                    width *= w0
-                    height *= h0
-                    
-                    # Convert to corner coordinates
-                    x1 = int(center_x - width / 2)
-                    y1 = int(center_y - height / 2)
-                    x2 = int(center_x + width / 2)
-                    y2 = int(center_y + height / 2)
-                    
-                    # Clip to image boundaries
-                    x1 = max(0, min(x1, w0 - 1))
-                    y1 = max(0, min(y1, h0 - 1))
-                    x2 = max(0, min(x2, w0 - 1))
-                    y2 = max(0, min(y2, h0 - 1))
-                    
-                    detections.append({
-                        "bbox": [x1, y1, x2, y2],
-                        "score": float(confidence)
-                    })
-        
-        # Apply NMS if we have detections
-        if detections:
-            boxes = np.array([det["bbox"] for det in detections])
-            scores = np.array([det["score"] for det in detections])
-            keep_indices = _nms(boxes, scores, self.iou_threshold)
-            detections = [detections[i] for i in keep_indices[:max_det]]
-        
-        return detections
+def _sigmoid(x: np.ndarray) -> np.ndarray:
+    return 1.0 / (1.0 + np.exp(-x))
 
-class AntiSpoofOpenCV:
+class AntiSpoofBinary:
     """Anti-spoofing using OpenCV DNN (replaces ONNX Runtime)"""
     
     def __init__(self, model_path: str, input_size: int = 128, rgb: bool = True, normalize: bool = True,
@@ -285,39 +292,37 @@ class AntiSpoofOpenCV:
         
         logger.info(f"Anti-spoof model loaded with OpenCV DNN from {model_path}")
 
+    def _preprocess(self, face_bgr: np.ndarray) -> np.ndarray:
+        img = cv2.resize(face_bgr, (self.input_size, self.input_size), interpolation=cv2.INTER_LINEAR)
+        if self.rgb:
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        img = img.astype(np.float32) / 255.0
+        if self.normalize:
+            img = (img - self.mean) / self.std
+        blob = cv2.dnn.blobFromImage(img, 1.0, (self.input_size, self.input_size), swapRB=False)
+        return blob
+
     def predict_live_prob(self, face_bgr: np.ndarray) -> float:
         """Predict liveness probability using OpenCV DNN"""
         try:
-            # Preprocess face
-            img = cv2.resize(face_bgr, (self.input_size, self.input_size), interpolation=cv2.INTER_LINEAR)
-            
-            if self.rgb:
-                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            
-            img = img.astype(np.float32) / 255.0
-            
-            if self.normalize:
-                img = (img - self.mean) / self.std
-            
-            # Create blob
-            blob = cv2.dnn.blobFromImage(img, 1.0, (self.input_size, self.input_size), swapRB=False)
+            inp = self._preprocess(face_bgr)
             
             # Run inference
-            self.net.setInput(blob)
-            output = self.net.forward()
+            self.net.setInput(inp)
+            out = self.net.forward()[0]
             
-            # Process output
-            if output.ndim > 1:
-                output = np.squeeze(output)
+            if out.ndim > 1:
+                out = np.squeeze(out)
             
-            if output.size == 2:
+            if out.size == 2:
                 # Softmax for 2-class output
-                exp_values = np.exp(output - np.max(output))
-                probabilities = exp_values / (np.sum(exp_values) + 1e-9)
-                live_prob = float(probabilities[self.live_index])
+                vec = out.astype(np.float32)
+                probs = np.exp(vec - np.max(vec))
+                probs = probs / (np.sum(probs) + 1e-9)
+                live_prob = float(probs[self.live_index])
             else:
                 # Sigmoid for single output
-                live_prob = float(1.0 / (1.0 + np.exp(-output)))
+                live_prob = float(_sigmoid(out.astype(np.float32)))
             
             return max(0.0, min(1.0, live_prob))
             
@@ -326,7 +331,6 @@ class AntiSpoofOpenCV:
             return 0.0  # Default to not live if error occurs
 
 def expand_and_clip_box(bbox_xyxy, scale: float, w: int, h: int):
-    """Expand bounding box and clip to image boundaries"""
     x1, y1, x2, y2 = bbox_xyxy
     bw = x2 - x1
     bh = y2 - y1
@@ -341,7 +345,6 @@ def expand_and_clip_box(bbox_xyxy, scale: float, w: int, h: int):
     return x1n, y1n, x2n, y2n
 
 def draw_live_overlay(img_bgr: np.ndarray, bbox, label: str, prob: float, color):
-    """Draw liveness detection overlay on image"""
     x1, y1, x2, y2 = [int(v) for v in bbox]
     cv2.rectangle(img_bgr, (x1, y1), (x2, y2), color, 2)
     text = f"{label} {prob:.2f}"
@@ -351,7 +354,6 @@ def draw_live_overlay(img_bgr: np.ndarray, bbox, label: str, prob: float, color)
     cv2.putText(img_bgr, text, (x1 + 3, y_top + th), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2, cv2.LINE_AA)
 
 def image_to_data_uri(img_bgr: np.ndarray) -> Optional[str]:
-    """Convert image to data URI for web display"""
     success, buf = cv2.imencode(".jpg", img_bgr, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
     if not success:
         return None
@@ -373,7 +375,7 @@ def initialize_models():
     try:
         # Initialize YOLO face detector with OpenCV DNN
         if os.path.exists(YOLO_FACE_MODEL_PATH):
-            yolo_face = YoloV5FaceDetectorOpenCV(YOLO_FACE_MODEL_PATH, input_size=640, conf_threshold=0.3, iou_threshold=0.45)
+            yolo_face = YoloV5FaceDetector(YOLO_FACE_MODEL_PATH, input_size=640, conf_threshold=0.3, iou_threshold=0.45)
             logger.info("YOLO Face Detector loaded successfully with OpenCV DNN")
         else:
             logger.warning(f"YOLO model not found at {YOLO_FACE_MODEL_PATH}, using dlib only")
@@ -381,7 +383,7 @@ def initialize_models():
         
         # Initialize anti-spoof model with OpenCV DNN
         if os.path.exists(ANTI_SPOOF_BIN_MODEL_PATH):
-            anti_spoof_bin = AntiSpoofOpenCV(ANTI_SPOOF_BIN_MODEL_PATH, input_size=128, rgb=True, normalize=True, live_index=1)
+            anti_spoof_bin = AntiSpoofBinary(ANTI_SPOOF_BIN_MODEL_PATH, input_size=128, rgb=True, normalize=True, live_index=1)
             logger.info("Anti-spoof model loaded successfully with OpenCV DNN")
         else:
             logger.warning(f"Anti-spoof model not found at {ANTI_SPOOF_BIN_MODEL_PATH}, liveness detection disabled")
@@ -434,7 +436,6 @@ def download_and_extract_model(model_path: str):
 models_loaded = initialize_models()
 
 def decode_image(base64_image):
-    """Decode base64 image to OpenCV format"""
     if ',' in base64_image:
         base64_image = base64_image.split(',')[1]
     image_bytes = base64.b64decode(base64_image)
@@ -685,15 +686,15 @@ def health_check():
     status_code = 200 if health_status['status'] in ['healthy', 'degraded'] else 503
     return jsonify(health_status), status_code
 
-# Error handlers
+# Simple error handlers (no template dependency)
 @app.errorhandler(404)
 def not_found(error):
-    return render_template('404.html'), 404
+    return jsonify({'error': 'Page not found'}), 404
 
 @app.errorhandler(500)
 def internal_error(error):
     logger.error(f"Internal server error: {error}")
-    return render_template('500.html'), 500
+    return jsonify({'error': 'Internal server error'}), 500
 
 # --------- STUDENT ROUTES ---------
 @app.route('/')
@@ -768,6 +769,11 @@ def login():
     try:
         student_id = request.form.get('student_id')
         password = request.form.get('password')
+        
+        if not student_id or not password:
+            flash('Please provide both student ID and password.', 'danger')
+            return redirect(url_for('login_page'))
+        
         student = students_collection.find_one({'student_id': student_id})
 
         if student and student.get('password') == password:
@@ -787,15 +793,15 @@ def login():
 
 @app.route('/face-login', methods=['POST'])
 def face_login():
+    if not client or not models_loaded:
+        flash('Service temporarily unavailable. Please try again later.', 'danger')
+        return redirect(url_for('login_page'))
+
     face_image = request.form.get('face_image')
-    face_role = request.form.get('face_role', 'student')  # 'student' or 'teacher'
+    face_role = request.form.get('face_role', 'student')
 
     if not face_image or not face_role:
         flash('Face image and role are required for face login.', 'danger')
-        return redirect(url_for('login_page'))
-
-    if not client or not models_loaded:
-        flash('Service temporarily unavailable. Please try again later.', 'danger')
         return redirect(url_for('login_page'))
 
     try:
@@ -856,7 +862,7 @@ def auto_face_login():
     try:
         data = request.json
         face_image = data.get('face_image')
-        face_role = data.get('face_role', 'student')  # Default to student
+        face_role = data.get('face_role', 'student')
         if not face_image:
             return jsonify({'success': False, 'message': 'No image received'})
             
@@ -1203,216 +1209,3 @@ def liveness_preview():
                     'message': 'No face detected',
                     'overlay': overlay_data
                 })
-    except Exception as e:
-        logger.error(f"Liveness preview error: {e}")
-        return jsonify({'success': False, 'message': 'Server error during preview'})
-
-# --------- TEACHER ROUTES ---------
-@app.route('/teacher_register.html')
-def teacher_register_page():
-    return render_template('teacher_register.html')
-
-@app.route('/teacher_login.html')
-def teacher_login_page():
-    return render_template('teacher_login.html')
-
-@app.route('/teacher_register', methods=['POST'])
-def teacher_register():
-    if not client:
-        flash('Service temporarily unavailable. Please try again later.', 'danger')
-        return redirect(url_for('teacher_register_page'))
-        
-    try:
-        teacher_data = {
-            'teacher_id': request.form.get('teacher_id'),
-            'name': request.form.get('name'),
-            'email': request.form.get('email'),
-            'department': request.form.get('department'),
-            'designation': request.form.get('designation'),
-            'mobile': request.form.get('mobile'),
-            'dob': request.form.get('dob'),
-            'gender': request.form.get('gender'),
-            'password': request.form.get('password'),
-            'created_at': datetime.now()
-        }
-        face_image = request.form.get('face_image')
-        if face_image and ',' in face_image:
-            image_data = face_image.split(',')[1]
-            teacher_data['face_image'] = Binary(base64.b64decode(image_data))
-            teacher_data['face_image_type'] = face_image.split(',')[0].split(':')[1].split(';')[0]
-        else:
-            flash('Face image is required for registration.', 'danger')
-            return redirect(url_for('teacher_register_page'))
-            
-        result = teachers_collection.insert_one(teacher_data)
-        if result.inserted_id:
-            flash('Registration successful! You can now login.', 'success')
-            return redirect(url_for('teacher_login_page'))
-        else:
-            flash('Registration failed. Please try again.', 'danger')
-            return redirect(url_for('teacher_register_page'))
-    except pymongo.errors.DuplicateKeyError:
-        flash('Teacher ID already exists. Please use a different ID.', 'danger')
-        return redirect(url_for('teacher_register_page'))
-    except Exception as e:
-        logger.error(f"Teacher registration error: {e}")
-        flash(f'Registration failed: {str(e)}', 'danger')
-        return redirect(url_for('teacher_register_page'))
-
-@app.route('/teacher_login', methods=['POST'])
-def teacher_login():
-    if not client:
-        flash('Service temporarily unavailable. Please try again later.', 'danger')
-        return redirect(url_for('teacher_login_page'))
-        
-    try:
-        teacher_id = request.form.get('teacher_id')
-        password = request.form.get('password')
-        teacher = teachers_collection.find_one({'teacher_id': teacher_id})
-        if teacher and teacher.get('password') == password:
-            session['logged_in'] = True
-            session['user_type'] = 'teacher'
-            session['teacher_id'] = teacher_id
-            session['name'] = teacher.get('name')
-            flash('Login successful!', 'success')
-            return redirect(url_for('teacher_dashboard'))
-        else:
-            flash('Invalid credentials. Please try again.', 'danger')
-            return redirect(url_for('teacher_login_page'))
-    except Exception as e:
-        logger.error(f"Teacher login error: {e}")
-        flash('Login failed. Please try again.', 'danger')
-        return redirect(url_for('teacher_login_page'))
-
-@app.route('/teacher_dashboard')
-def teacher_dashboard():
-    if 'logged_in' not in session or session.get('user_type') != 'teacher':
-        return redirect(url_for('teacher_login_page'))
-    
-    if not client:
-        flash('Service temporarily unavailable.', 'danger')
-        return redirect(url_for('teacher_login_page'))
-        
-    try:
-        teacher_id = session.get('teacher_id')
-        teacher = teachers_collection.find_one({'teacher_id': teacher_id})
-        if teacher and 'face_image' in teacher and teacher['face_image']:
-            face_image_base64 = base64.b64encode(teacher['face_image']).decode('utf-8')
-            mime_type = teacher.get('face_image_type', 'image/jpeg')
-            teacher['face_image_url'] = f"data:{mime_type};base64,{face_image_base64}"
-        return render_template('teacher_dashboard.html', teacher=teacher)
-    except Exception as e:
-        logger.error(f"Teacher dashboard error: {e}")
-        flash('Error loading dashboard.', 'danger')
-        return redirect(url_for('teacher_login_page'))
-
-@app.route('/teacher_logout')
-def teacher_logout():
-    session.clear()
-    flash('You have been logged out', 'info')
-    return redirect(url_for('teacher_login_page'))
-
-# --------- COMMON LOGOUT ---------
-@app.route('/logout')
-def logout():
-    session.clear()
-    flash('You have been logged out', 'info')
-    return redirect(url_for('login_page'))
-
-# --------- METRICS JSON ENDPOINTS ---------
-@app.route('/metrics-data', methods=['GET'])
-def metrics_data():
-    try:
-        data = compute_metrics()
-        if client:
-            recent = list(metrics_events.find({}, {"_id": 0}).sort("ts", -1).limit(200))
-            normalized_recent = []
-            for r in recent:
-                if isinstance(r.get("ts"), datetime):
-                    r["ts"] = r["ts"].isoformat()
-                event, attempt_type = classify_event(r)
-                if event and not r.get("event"):
-                    r["event"] = event
-                if attempt_type and not r.get("attempt_type"):
-                    r["attempt_type"] = attempt_type
-                if "liveness_pass" not in r:
-                    if r.get("decision") == "spoof_blocked":
-                        r["liveness_pass"] = False
-                    elif isinstance(r.get("live_prob"), (int, float)):
-                        r["liveness_pass"] = bool(r["live_prob"] >= 0.7)
-                    else:
-                        r["liveness_pass"] = None
-                normalized_recent.append(r)
-            data["recent"] = normalized_recent
-        else:
-            data["recent"] = []
-        data["avg_latency_ms"] = compute_latency_avg()
-        return jsonify(data)
-    except Exception as e:
-        logger.error(f"Metrics data error: {e}")
-        return jsonify({'error': 'Unable to retrieve metrics data'}), 500
-
-@app.route('/metrics-json')
-def metrics_json():
-    try:
-        m = compute_metrics()
-        counts = m["counts"]
-        rates = m["rates"]
-        totals = m["totals"]
-        avg_latency = compute_latency_avg()
-        accuracy_pct = rates["accuracy"] * 100.0
-        far_pct = rates["FAR"] * 100.0
-        frr_pct = rates["FRR"] * 100.0
-
-        return jsonify({
-            'Accuracy': f"{accuracy_pct:.2f}%" if totals["totalAttempts"] > 0 else "N/A",
-            'False Accepts (FAR)': f"{far_pct:.2f}%" if counts["impostorAttempts"] > 0 else "N/A",
-            'False Rejects (FRR)': f"{frr_pct:.2f}%" if counts["genuineAttempts"] > 0 else "N/A",
-            'Average Inference Time (s)': f"{(avg_latency/1000.0):.2f}" if isinstance(avg_latency, (int, float)) else "N/A",
-            'Correct Recognitions': counts["trueAccepts"],
-            'Total Attempts': totals["totalAttempts"],
-            'Unauthorized Attempts': counts["unauthorizedRejected"],
-            'enhanced': {
-                'totals': {
-                    'attempts': totals["totalAttempts"],
-                    'trueAccepts': counts["trueAccepts"],
-                    'falseAccepts': counts["falseAccepts"],
-                    'trueRejects': counts["trueRejects"],
-                    'falseRejects': counts["falseRejects"],
-                    'genuineAttempts': counts["genuineAttempts"],
-                    'impostorAttempts': counts["impostorAttempts"],
-                    'unauthorizedRejected': counts["unauthorizedRejected"],
-                    'unauthorizedAccepted': counts["unauthorizedAccepted"],
-                },
-                'accuracy_pct': round(accuracy_pct, 2),
-                'avg_latency_ms': round(avg_latency, 2) if isinstance(avg_latency, (int, float)) else None
-            }
-        })
-    except Exception as e:
-        logger.error(f"Metrics JSON error: {e}")
-        return jsonify({'error': 'Unable to compute metrics'}), 500
-
-@app.route('/metrics-events')
-def metrics_events_api():
-    try:
-        limit = int(request.args.get("limit", 200))
-        if client:
-            cursor = metrics_events.find({}, {"_id": 0}).sort("ts", -1).limit(limit)
-            events = list(cursor)
-            for ev in events:
-                if isinstance(ev.get("ts"), datetime):
-                    ev["ts"] = ev["ts"].isoformat()
-            return jsonify(events)
-        else:
-            return jsonify([])
-    except Exception as e:
-        logger.error(f"Metrics events error: {e}")
-        return jsonify({'error': 'Unable to retrieve metrics events'}), 500
-
-# Production-ready app configuration
-if __name__ == '__main__':
-    # Only run in development
-    if os.getenv('FLASK_ENV') != 'production':
-        app.run(debug=True, host='0.0.0.0', port=5000)
-    else:
-        logger.info("Application started in production mode")
