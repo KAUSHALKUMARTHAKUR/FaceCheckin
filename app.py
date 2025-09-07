@@ -9,18 +9,11 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 import numpy as np
 import cv2
-import requests
-from typing import Optional, Dict, Tuple, Any
 from deepface import DeepFace
-import tempfile
-import logging
-from sklearn.metrics.pairwise import cosine_similarity
+import mediapipe as mp
+from typing import Optional, Dict, Tuple, Any
 
-# Set up logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# --- Evaluation Metrics Counters ---
+# --- Evaluation Metrics Counters (legacy, kept for compatibility display) ---
 total_attempts = 0
 correct_recognitions = 0
 false_accepts = 0
@@ -28,12 +21,13 @@ false_rejects = 0
 unauthorized_attempts = 0
 inference_times = []
 
+# ---------------------------------------------------
 # Load environment variables
 load_dotenv()
 
 # Initialize Flask app
 app = Flask(__name__, static_folder='app/static', template_folder='app/templates')
-app.secret_key = os.getenv('SECRET_KEY', os.urandom(24))
+app.secret_key = os.urandom(24)
 
 # MongoDB Connection
 try:
@@ -60,213 +54,222 @@ try:
 except Exception as e:
     print(f"MongoDB connection error: {e}")
 
-# OpenCV DNN Face Detector
-class OpenCVFaceDetector:
-    def __init__(self, confidence_threshold=0.5):
-        self.confidence_threshold = confidence_threshold
-        # Load OpenCV DNN face detection model
-        try:
-            # Download models if they don't exist
-            self.prototxt_path = "models/deploy.prototxt"
-            self.model_path = "models/res10_300x300_ssd_iter_140000.caffemodel"
-            
-            # Create models directory if it doesn't exist
-            os.makedirs("models", exist_ok=True)
-            
-            # Download prototxt file
-            if not os.path.exists(self.prototxt_path):
-                print("Downloading face detection prototxt...")
-                prototxt_url = "https://raw.githubusercontent.com/opencv/opencv/master/samples/dnn/face_detector/deploy.prototxt"
-                try:
-                    response = requests.get(prototxt_url, timeout=30)
-                    response.raise_for_status()
-                    with open(self.prototxt_path, 'w') as f:
-                        f.write(response.text)
-                    print("Prototxt downloaded successfully")
-                except Exception as e:
-                    print(f"Error downloading prototxt: {e}")
-            
-            # Download caffemodel file
-            if not os.path.exists(self.model_path):
-                print("Downloading face detection model...")
-                model_url = "https://raw.githubusercontent.com/opencv/opencv_3rdparty/dnn_samples_face_detector_20170830/res10_300x300_ssd_iter_140000.caffemodel"
-                try:
-                    response = requests.get(model_url, timeout=60)
-                    response.raise_for_status()
-                    with open(self.model_path, 'wb') as f:
-                        f.write(response.content)
-                    print("Model downloaded successfully")
-                except Exception as e:
-                    print(f"Error downloading model: {e}")
-            
-            if os.path.exists(self.prototxt_path) and os.path.exists(self.model_path):
-                self.net = cv2.dnn.readNetFromCaffe(self.prototxt_path, self.model_path)
-                print("OpenCV face detection model loaded successfully")
-            else:
-                self.net = None
-                print("Could not load face detection model")
-                
-        except Exception as e:
-            print(f"Error loading face detection model: {e}")
-            self.net = None
+# ---------------- Lightweight Model Implementations ----------------
 
-    def detect_faces(self, image):
-        if self.net is None:
+# Initialize YuNet Face Detector (OpenCV built-in)
+try:
+    face_detector = cv2.FaceDetectorYN.create(
+        model="",  # Uses built-in model
+        config="",
+        input_size=(640, 480)
+    )
+    print("YuNet face detector initialized successfully")
+except Exception as e:
+    print(f"Error initializing YuNet: {e}")
+    face_detector = None
+
+# Initialize MediaPipe Face Mesh
+try:
+    mp_face_mesh = mp.solutions.face_mesh
+    face_mesh = mp_face_mesh.FaceMesh(
+        static_image_mode=False,
+        max_num_faces=1,
+        refine_landmarks=True,
+        min_detection_confidence=0.5
+    )
+    print("MediaPipe Face Mesh initialized successfully")
+except Exception as e:
+    print(f"Error initializing MediaPipe: {e}")
+    face_mesh = None
+
+# Initialize Haar Cascade for simple liveness detection
+try:
+    eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_eye.xml')
+    print("Eye cascade classifier initialized successfully")
+except Exception as e:
+    print(f"Error initializing eye cascade: {e}")
+    eye_cascade = None
+
+def detect_faces_yunet(image):
+    """Detect faces using YuNet (lightweight OpenCV detector)"""
+    if face_detector is None:
+        return []
+    
+    try:
+        height, width = image.shape[:2]
+        face_detector.setInputSize((width, height))
+        
+        _, faces = face_detector.detect(image)
+        if faces is None:
             return []
         
-        try:
-            h, w = image.shape[:2]
-            blob = cv2.dnn.blobFromImage(cv2.resize(image, (300, 300)), 1.0,
-                                       (300, 300), (104.0, 177.0, 123.0))
-            self.net.setInput(blob)
-            detections = self.net.forward()
+        # Convert to format similar to YOLO output
+        detections = []
+        for face in faces:
+            x1, y1, w, h = face[:4].astype(int)
+            x2, y2 = x1 + w, y1 + h
+            confidence = face[14] if len(face) > 14 else 0.9
             
-            faces = []
-            for i in range(0, detections.shape[2]):
-                confidence = detections[0, 0, i, 2]
-                if confidence > self.confidence_threshold:
-                    box = detections[0, 0, i, 3:7] * np.array([w, h, w, h])
-                    x, y, x1, y1 = box.astype("int")
-                    # Ensure coordinates are within image bounds
-                    x = max(0, x)
-                    y = max(0, y)
-                    x1 = min(w, x1)
-                    y1 = min(h, y1)
-                    faces.append({
-                        'bbox': [x, y, x1, y1],
-                        'confidence': float(confidence)
-                    })
-            return faces
-        except Exception as e:
-            print(f"Error in face detection: {e}")
-            return []
-
-# Simple anti-spoofing using image quality metrics
-class SimpleAntiSpoof:
-    def __init__(self, blur_threshold=100, brightness_threshold=(50, 200)):
-        self.blur_threshold = blur_threshold
-        self.brightness_threshold = brightness_threshold
-
-    def is_live(self, face_image):
-        try:
-            # Convert to grayscale
-            gray = cv2.cvtColor(face_image, cv2.COLOR_BGR2GRAY)
-            
-            # Check blur using Laplacian variance
-            blur_score = cv2.Laplacian(gray, cv2.CV_64F).var()
-            
-            # Check brightness
-            brightness = np.mean(gray)
-            
-            # Simple liveness check
-            is_live = (blur_score > self.blur_threshold and 
-                      self.brightness_threshold[0] < brightness < self.brightness_threshold[1])
-            
-            confidence = min(blur_score / 200.0, 1.0)  # Normalize to 0-1
-            
-            return is_live, confidence
-        except Exception as e:
-            print(f"Error in liveness detection: {e}")
-            return False, 0.0
-
-# Initialize models
-face_detector = OpenCVFaceDetector()
-anti_spoof = SimpleAntiSpoof()
-
-def decode_image(base64_image):
-    try:
-        if ',' in base64_image:
-            base64_image = base64_image.split(',')[1]
-        image_bytes = base64.b64decode(base64_image)
-        np_array = np.frombuffer(image_bytes, np.uint8)
-        image = cv2.imdecode(np_array, cv2.IMREAD_COLOR)
-        return image
+            detections.append({
+                "bbox": [x1, y1, x2, y2],
+                "score": float(confidence)
+            })
+        
+        return detections
     except Exception as e:
-        print(f"Error decoding image: {e}")
-        return None
+        print(f"Error in YuNet detection: {e}")
+        return []
 
-def get_face_embedding(image):
-    """Extract face embedding using DeepFace"""
-    try:
-        # Save image temporarily
-        with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as tmp_file:
-            cv2.imwrite(tmp_file.name, image)
-            
-            # Get embedding using DeepFace
-            embedding = DeepFace.represent(img_path=tmp_file.name, 
-                                         model_name='Facenet', 
-                                         enforce_detection=True,
-                                         detector_backend='opencv')
-            
-            # Clean up temp file
-            os.unlink(tmp_file.name)
-            
-            if embedding and len(embedding) > 0:
-                return np.array(embedding[0]['embedding'])
-            return None
-    except Exception as e:
-        print(f"Error getting face embedding: {e}")
-        # Clean up temp file if it exists
-        try:
-            if 'tmp_file' in locals():
-                os.unlink(tmp_file.name)
-        except:
-            pass
-        return None
-
-def recognize_face(image, user_id, user_type='student'):
-    """Face recognition using DeepFace"""
-    global total_attempts, correct_recognitions, false_accepts, false_rejects, inference_times, unauthorized_attempts
+def recognize_face_deepface(image, user_id, user_type='student'):
+    """Face recognition using DeepFace (lightweight alternative)"""
+    global total_attempts, correct_recognitions, unauthorized_attempts, inference_times
     
     try:
         start_time = time.time()
         
-        # Get face embedding from input image
-        test_embedding = get_face_embedding(image)
-        if test_embedding is None:
-            return False, "No face detected"
-
-        # Get user from database
+        # Save current image temporarily for DeepFace
+        temp_img_path = f"temp_current_{user_id}.jpg"
+        cv2.imwrite(temp_img_path, image)
+        
+        # Get user's reference image
         if user_type == 'student':
             user = students_collection.find_one({'student_id': user_id})
         else:
             user = teachers_collection.find_one({'teacher_id': user_id})
-
+        
         if not user or 'face_image' not in user:
             unauthorized_attempts += 1
+            # Clean up temp file
+            if os.path.exists(temp_img_path):
+                os.remove(temp_img_path)
             return False, f"No reference face found for {user_type} ID {user_id}"
-
-        # Decode reference image
+        
+        # Save reference image temporarily
         ref_image_bytes = user['face_image']
         ref_image_array = np.frombuffer(ref_image_bytes, np.uint8)
         ref_image = cv2.imdecode(ref_image_array, cv2.IMREAD_COLOR)
+        temp_ref_path = f"temp_ref_{user_id}.jpg"
+        cv2.imwrite(temp_ref_path, ref_image)
         
-        # Get reference embedding
-        ref_embedding = get_face_embedding(ref_image)
-        if ref_embedding is None:
-            return False, "No face detected in reference image"
-
-        # Calculate cosine similarity
-        similarity = cosine_similarity([test_embedding], [ref_embedding])[0][0]
-        
-        # Threshold for recognition (adjust as needed)
-        threshold = 0.6
-        
-        inference_time = time.time() - start_time
-        inference_times.append(inference_time)
-        total_attempts += 1
-
-        if similarity > threshold:
-            correct_recognitions += 1
-            return True, f"Face recognized (similarity={similarity:.3f}, time={inference_time:.2f}s)"
-        else:
-            unauthorized_attempts += 1
-            return False, f"Unauthorized attempt detected (similarity={similarity:.3f})"
+        try:
+            # Use DeepFace for verification
+            result = DeepFace.verify(
+                img1_path=temp_img_path,
+                img2_path=temp_ref_path,
+                model_name="Facenet512",  # Lightweight model
+                enforce_detection=False
+            )
             
+            is_verified = result["verified"]
+            distance = result["distance"]
+            
+            inference_time = time.time() - start_time
+            inference_times.append(inference_time)
+            total_attempts += 1
+            
+            if is_verified:
+                correct_recognitions += 1
+                return True, f"Face recognized (distance={distance:.3f}, time={inference_time:.2f}s)"
+            else:
+                unauthorized_attempts += 1
+                return False, f"Unauthorized attempt detected (distance={distance:.3f})"
+                
+        except Exception as e:
+            return False, f"DeepFace verification error: {str(e)}"
+        
+        finally:
+            # Clean up temporary files
+            for temp_file in [temp_img_path, temp_ref_path]:
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
+    
     except Exception as e:
         return False, f"Error in face recognition: {str(e)}"
 
-# Helper functions for metrics
+def get_face_landmarks_mediapipe(image):
+    """Get face landmarks using MediaPipe"""
+    if face_mesh is None:
+        return None
+    
+    try:
+        rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        results = face_mesh.process(rgb_image)
+        
+        if results.multi_face_landmarks:
+            return results.multi_face_landmarks[0]
+        return None
+    except Exception as e:
+        print(f"Error in MediaPipe landmarks: {e}")
+        return None
+
+def simple_liveness_check(image):
+    """Simple liveness detection using eye detection"""
+    if eye_cascade is None:
+        return 0.5  # Default moderate score if cascade not available
+    
+    try:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        eyes = eye_cascade.detectMultiScale(gray, 1.3, 5)
+        
+        # Simple liveness scoring based on eye detection
+        if len(eyes) >= 2:
+            return 0.8  # High confidence if both eyes detected
+        elif len(eyes) == 1:
+            return 0.6  # Medium confidence if one eye detected
+        else:
+            return 0.3  # Low confidence if no eyes detected
+    except Exception as e:
+        print(f"Error in liveness check: {e}")
+        return 0.5
+
+def expand_and_clip_box(bbox_xyxy, scale: float, w: int, h: int):
+    x1, y1, x2, y2 = bbox_xyxy
+    bw = x2 - x1
+    bh = y2 - y1
+    cx = x1 + bw / 2.0
+    cy = y1 + bh / 2.0
+    bw2 = bw * scale
+    bh2 = bh * scale
+    x1n = int(max(0, cx - bw2 / 2.0))
+    y1n = int(max(0, cy - bh2 / 2.0))
+    x2n = int(min(w - 1, cx + bw2 / 2.0))
+    y2n = int(min(h - 1, cy + bh2 / 2.0))
+    return x1n, y1n, x2n, y2n
+
+def draw_live_overlay(img_bgr: np.ndarray, bbox, label: str, prob: float, color):
+    x1, y1, x2, y2 = [int(v) for v in bbox]
+    cv2.rectangle(img_bgr, (x1, y1), (x2, y2), color, 2)
+    text = f"{label} {prob:.2f}"
+    (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
+    y_top = max(0, y1 - th - 8)
+    cv2.rectangle(img_bgr, (x1, y_top), (x1 + tw + 6, y_top + th + 6), color, -1)
+    cv2.putText(img_bgr, text, (x1 + 3, y_top + th), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2, cv2.LINE_AA)
+
+def image_to_data_uri(img_bgr: np.ndarray) -> Optional[str]:
+    success, buf = cv2.imencode(".jpg", img_bgr, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
+    if not success:
+        return None
+    b64 = base64.b64encode(buf.tobytes()).decode("utf-8")
+    return f"data:image/jpeg;base64,{b64}"
+
+def decode_image(base64_image):
+    if ',' in base64_image:
+        base64_image = base64_image.split(',')[1]
+    image_bytes = base64.b64decode(base64_image)
+    np_array = np.frombuffer(image_bytes, np.uint8)
+    image = cv2.imdecode(np_array, cv2.IMREAD_COLOR)
+    return image
+
+# Legacy function for backward compatibility
+def get_face_features(image):
+    """Legacy wrapper - now uses DeepFace internally"""
+    return None  # DeepFace handles feature extraction internally
+
+def recognize_face(image, user_id, user_type='student'):
+    """Legacy wrapper for the new DeepFace recognition"""
+    return recognize_face_deepface(image, user_id, user_type)
+
+# ---------------------- Metrics helpers ----------------------
 def log_metrics_event(event: dict):
     try:
         metrics_events.insert_one(event)
@@ -308,7 +311,7 @@ def log_metrics_event_normalized(
     log_metrics_event(doc)
 
 def classify_event(ev: Dict[str, Any]) -> Tuple[Optional[str], Optional[str]]:
-    """Returns (event, attempt_type)"""
+    """Returns (event, attempt_type), robust to legacy documents."""
     if ev.get("event"):
         e = ev.get("event")
         at = ev.get("attempt_type")
@@ -339,7 +342,7 @@ def classify_event(ev: Dict[str, Any]) -> Tuple[Optional[str], Optional[str]]:
     return None, None
 
 def compute_metrics(limit: int = 10000):
-    """Compute evaluation metrics"""
+    """Robust metrics aggregation that tolerates legacy docs."""
     cursor = metrics_events.find({}, {"_id": 0}).sort("ts", -1).limit(limit)
     counts = {
         "trueAccepts": 0,
@@ -403,14 +406,7 @@ def compute_latency_avg(limit: int = 300) -> Optional[float]:
         return None
     return sum(vals) / len(vals)
 
-def image_to_data_uri(img_bgr: np.ndarray) -> Optional[str]:
-    success, buf = cv2.imencode(".jpg", img_bgr, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
-    if not success:
-        return None
-    b64 = base64.b64encode(buf.tobytes()).decode("utf-8")
-    return f"data:image/jpeg;base64,{b64}"
-
-# --------- ROUTES ---------
+# --------- STUDENT ROUTES ---------
 @app.route('/')
 def home():
     return render_template('home.html')
@@ -444,7 +440,6 @@ def register():
             'password': request.form.get('password'),
             'created_at': datetime.now()
         }
-        
         face_image = request.form.get('face_image')
         if face_image and ',' in face_image:
             image_data = face_image.split(',')[1]
@@ -461,7 +456,6 @@ def register():
         else:
             flash('Registration failed. Please try again.', 'danger')
             return redirect(url_for('register_page'))
-            
     except pymongo.errors.DuplicateKeyError:
         flash('Student ID already exists. Please use a different ID.', 'danger')
         return redirect(url_for('register_page'))
@@ -496,9 +490,6 @@ def face_login():
         return redirect(url_for('login_page'))
 
     image = decode_image(face_image)
-    if image is None:
-        flash('Invalid image data.', 'danger')
-        return redirect(url_for('login_page'))
 
     if face_role == 'student':
         collection = students_collection
@@ -513,56 +504,68 @@ def face_login():
         return redirect(url_for('login_page'))
 
     users = collection.find({'face_image': {'$exists': True, '$ne': None}})
-    test_embedding = get_face_embedding(image)
     
-    if test_embedding is None:
-        flash('No face detected. Please try again.', 'danger')
-        return redirect(url_for('login_page'))
-
-    for user in users:
-        try:
+    # Use DeepFace for face matching
+    temp_login_path = "temp_login_image.jpg"
+    cv2.imwrite(temp_login_path, image)
+    
+    try:
+        for user in users:
             ref_image_bytes = user['face_image']
             ref_image_array = np.frombuffer(ref_image_bytes, np.uint8)
             ref_image = cv2.imdecode(ref_image_array, cv2.IMREAD_COLOR)
-            ref_embedding = get_face_embedding(ref_image)
             
-            if ref_embedding is None:
-                continue
+            temp_ref_path = f"temp_ref_{user[id_field]}.jpg"
+            cv2.imwrite(temp_ref_path, ref_image)
+            
+            try:
+                result = DeepFace.verify(
+                    img1_path=temp_login_path,
+                    img2_path=temp_ref_path,
+                    model_name="Facenet512",
+                    enforce_detection=False
+                )
                 
-            similarity = cosine_similarity([test_embedding], [ref_embedding])[0][0]
+                if result["verified"]:
+                    session['logged_in'] = True
+                    session['user_type'] = face_role
+                    session[id_field] = user[id_field]
+                    session['name'] = user.get('name')
+                    flash('Face login successful!', 'success')
+                    
+                    # Cleanup
+                    os.remove(temp_ref_path)
+                    os.remove(temp_login_path)
+                    return redirect(url_for(dashboard_route))
+                
+                os.remove(temp_ref_path)
+            except Exception as e:
+                if os.path.exists(temp_ref_path):
+                    os.remove(temp_ref_path)
+                continue
+        
+        if os.path.exists(temp_login_path):
+            os.remove(temp_login_path)
             
-            if similarity > 0.6:
-                session['logged_in'] = True
-                session['user_type'] = face_role
-                session[id_field] = user[id_field]
-                session['name'] = user.get('name')
-                flash('Face login successful!', 'success')
-                return redirect(url_for(dashboard_route))
-        except Exception as e:
-            print(f"Error processing user {user.get(id_field)}: {e}")
-            continue
+    except Exception as e:
+        if os.path.exists(temp_login_path):
+            os.remove(temp_login_path)
 
     flash('Face not recognized. Please try again or contact admin.', 'danger')
     return redirect(url_for('login_page'))
 
 @app.route('/auto-face-login', methods=['POST'])
 def auto_face_login():
+    """Enhanced auto face login with role support"""
     try:
         data = request.json
         face_image = data.get('face_image')
         face_role = data.get('face_role', 'student')
-        
         if not face_image:
             return jsonify({'success': False, 'message': 'No image received'})
-            
+        
         image = decode_image(face_image)
-        if image is None:
-            return jsonify({'success': False, 'message': 'Invalid image data'})
-            
-        test_embedding = get_face_embedding(image)
-        if test_embedding is None:
-            return jsonify({'success': False, 'message': 'No face detected'})
-
+        
         if face_role == 'teacher':
             collection = teachers_collection
             id_field = 'teacher_id'
@@ -572,33 +575,56 @@ def auto_face_login():
             id_field = 'student_id'
             dashboard_route = '/dashboard'
 
-        users = collection.find({'face_image': {'$exists': True, '$ne': None}})
+        # Use DeepFace for recognition
+        temp_auto_path = "temp_auto_login.jpg"
+        cv2.imwrite(temp_auto_path, image)
         
-        for user in users:
-            try:
-                ref_image_array = np.frombuffer(user['face_image'], np.uint8)
-                ref_image = cv2.imdecode(ref_image_array, cv2.IMREAD_COLOR)
-                ref_embedding = get_face_embedding(ref_image)
-                
-                if ref_embedding is None:
-                    continue
+        try:
+            users = collection.find({'face_image': {'$exists': True, '$ne': None}})
+            for user in users:
+                try:
+                    ref_image_array = np.frombuffer(user['face_image'], np.uint8)
+                    ref_image = cv2.imdecode(ref_image_array, cv2.IMREAD_COLOR)
                     
-                similarity = cosine_similarity([test_embedding], [ref_embedding])[0][0]
+                    temp_ref_path = f"temp_auto_ref_{user[id_field]}.jpg"
+                    cv2.imwrite(temp_ref_path, ref_image)
+                    
+                    result = DeepFace.verify(
+                        img1_path=temp_auto_path,
+                        img2_path=temp_ref_path,
+                        model_name="Facenet512",
+                        enforce_detection=False
+                    )
+                    
+                    if result["verified"]:
+                        session['logged_in'] = True
+                        session['user_type'] = face_role
+                        session[id_field] = user[id_field]
+                        session['name'] = user.get('name')
+                        
+                        # Cleanup
+                        os.remove(temp_ref_path)
+                        os.remove(temp_auto_path)
+                        
+                        return jsonify({
+                            'success': True,
+                            'message': f'Welcome {user["name"]}! Redirecting...',
+                            'redirect_url': dashboard_route,
+                            'face_role': face_role
+                        })
+                    
+                    os.remove(temp_ref_path)
+                except Exception as e:
+                    if os.path.exists(f"temp_auto_ref_{user[id_field]}.jpg"):
+                        os.remove(f"temp_auto_ref_{user[id_field]}.jpg")
+                    continue
+            
+            if os.path.exists(temp_auto_path):
+                os.remove(temp_auto_path)
                 
-                if similarity > 0.6:
-                    session['logged_in'] = True
-                    session['user_type'] = face_role
-                    session[id_field] = user[id_field]
-                    session['name'] = user.get('name')
-                    return jsonify({
-                        'success': True,
-                        'message': f'Welcome {user["name"]}! Redirecting...',
-                        'redirect_url': dashboard_route,
-                        'face_role': face_role
-                    })
-            except Exception as e:
-                print(f"Error processing user {user.get(id_field)}: {e}")
-                continue
+        except Exception as e:
+            if os.path.exists(temp_auto_path):
+                os.remove(temp_auto_path)
 
         return jsonify({'success': False, 'message': f'Face not recognized in {face_role} database'})
     except Exception as e:
@@ -619,12 +645,10 @@ def dashboard():
         return redirect(url_for('login_page'))
     student_id = session.get('student_id')
     student = students_collection.find_one({'student_id': student_id})
-    
     if student and 'face_image' in student and student['face_image']:
         face_image_base64 = base64.b64encode(student['face_image']).decode('utf-8')
         mime_type = student.get('face_image_type', 'image/jpeg')
         student['face_image_url'] = f"data:{mime_type};base64,{face_image_base64}"
-    
     attendance_records = list(attendance_collection.find({'student_id': student_id}).sort('date', -1))
     return render_template('dashboard.html', student=student, attendance_records=attendance_records)
 
@@ -643,37 +667,64 @@ def mark_attendance():
     if not all([student_id, program, semester, course, face_image]):
         return jsonify({'success': False, 'message': 'Missing required data'})
 
+    client_ip = request.remote_addr
     t0 = time.time()
+
+    # Decode image
     image = decode_image(face_image)
-    
     if image is None or image.size == 0:
         return jsonify({'success': False, 'message': 'Invalid image data'})
 
-    # Face detection
-    faces = face_detector.detect_faces(image)
-    if not faces:
-        return jsonify({'success': False, 'message': 'No face detected'})
-
-    # Get the best face detection
-    best_face = max(faces, key=lambda f: f['confidence'])
-    x, y, x1, y1 = best_face['bbox']
-    
-    # Extract face region with some padding
-    padding = 20
     h, w = image.shape[:2]
-    y_start = max(0, y - padding)
-    y_end = min(h, y1 + padding)
-    x_start = max(0, x - padding)
-    x_end = min(w, x1 + padding)
-    
-    face_crop = image[y_start:y_end, x_start:x_end]
-    
-    if face_crop.size == 0:
-        return jsonify({'success': False, 'message': 'Failed to crop face'})
+    vis = image.copy()
 
-    # Simple liveness check
-    is_live, live_confidence = anti_spoof.is_live(face_crop)
-    
+    # 1) YuNet face detection (lightweight)
+    detections = detect_faces_yunet(image)
+    if not detections:
+        overlay = image_to_data_uri(vis)
+        log_metrics_event_normalized(
+            event="reject_true",
+            attempt_type="impostor",
+            claimed_id=student_id,
+            recognized_id=None,
+            liveness_pass=False,
+            distance=None,
+            live_prob=None,
+            latency_ms=round((time.time() - t0) * 1000.0, 2),
+            client_ip=client_ip,
+            reason="no_face_detected"
+        )
+        return jsonify({'success': False, 'message': 'No face detected for liveness', 'overlay': overlay})
+
+    # Pick highest-score detection
+    best = max(detections, key=lambda d: d["score"])
+    x1, y1, x2, y2 = [int(v) for v in best["bbox"]]
+    x1e, y1e, x2e, y2e = expand_and_clip_box((x1, y1, x2, y2), scale=1.2, w=w, h=h)
+    face_crop = image[y1e:y2e, x1e:x2e]
+    if face_crop.size == 0:
+        overlay = image_to_data_uri(vis)
+        log_metrics_event_normalized(
+            event="reject_true",
+            attempt_type="impostor",
+            claimed_id=student_id,
+            recognized_id=None,
+            liveness_pass=False,
+            distance=None,
+            live_prob=None,
+            latency_ms=round((time.time() - t0) * 1000.0, 2),
+            client_ip=client_ip,
+            reason="failed_crop"
+        )
+        return jsonify({'success': False, 'message': 'Failed to crop face for liveness', 'overlay': overlay})
+
+    # 2) Simple liveness check (lightweight)
+    live_prob = simple_liveness_check(face_crop)
+    is_live = live_prob >= 0.7
+    label = "LIVE" if is_live else "SPOOF"
+    color = (0, 200, 0) if is_live else (0, 0, 255)
+    draw_live_overlay(vis, (x1e, y1e, x2e, y2e), label, live_prob, color)
+    overlay_data = image_to_data_uri(vis)
+
     if not is_live:
         log_metrics_event_normalized(
             event="reject_true",
@@ -682,38 +733,52 @@ def mark_attendance():
             recognized_id=None,
             liveness_pass=False,
             distance=None,
-            live_prob=float(live_confidence),
+            live_prob=float(live_prob),
             latency_ms=round((time.time() - t0) * 1000.0, 2),
-            client_ip=request.remote_addr,
+            client_ip=client_ip,
             reason="liveness_fail"
         )
-        return jsonify({'success': False, 'message': f'Liveness check failed (confidence={live_confidence:.2f})'})
+        return jsonify({'success': False, 'message': f'Spoof detected or face not live (p={live_prob:.2f}).', 'overlay': overlay_data})
 
-    # Face recognition
-    success, message = recognize_face(image, student_id, user_type='student')
+    # 3) Face recognition using DeepFace
+    success, message = recognize_face_deepface(image, student_id, user_type='student')
     total_latency_ms = round((time.time() - t0) * 1000.0, 2)
 
-    # Parse similarity from message if available
-    similarity_val = None
+    # Parse distance from message if available
+    distance_val = None
     try:
-        if "similarity=" in message:
-            part = message.split("similarity=")[1]
-            similarity_val = float(part.split(",")[0].strip(") "))
+        if "distance=" in message:
+            part = message.split("distance=")[1]
+            distance_val = float(part.split(",")[0].strip(") "))
     except Exception:
         pass
 
+    # Derive reason string
+    reason = None
+    if not success:
+        if message.startswith("Unauthorized attempt"):
+            reason = "unauthorized_attempt"
+        elif message.startswith("No face detected"):
+            reason = "no_face_detected"
+        elif message.startswith("False reject"):
+            reason = "false_reject"
+        elif message.startswith("Error in face recognition") or message.startswith("DeepFace"):
+            reason = "recognition_error"
+        else:
+            reason = "not_recognized"
+
+    # Log event
     if success:
-        # Log successful recognition
         log_metrics_event_normalized(
             event="accept_true",
             attempt_type="genuine",
             claimed_id=student_id,
             recognized_id=student_id,
             liveness_pass=True,
-            distance=similarity_val,
-            live_prob=float(live_confidence),
+            distance=distance_val,
+            live_prob=float(live_prob),
             latency_ms=total_latency_ms,
-            client_ip=request.remote_addr,
+            client_ip=client_ip,
             reason=None
         )
         
@@ -728,50 +793,54 @@ def mark_attendance():
             'status': 'present',
             'created_at': datetime.now()
         }
-        
         try:
             existing_attendance = attendance_collection.find_one({
                 'student_id': student_id,
                 'subject': course,
                 'date': datetime.now().date().isoformat()
             })
-            
             if existing_attendance:
-                return jsonify({'success': False, 'message': 'Attendance already marked for this course today'})
-            
+                return jsonify({'success': False, 'message': 'Attendance already marked for this course today', 'overlay': overlay_data})
             attendance_collection.insert_one(attendance_data)
-            return jsonify({'success': True, 'message': 'Attendance marked successfully'})
-            
+            return jsonify({'success': True, 'message': 'Attendance marked successfully', 'overlay': overlay_data})
         except Exception as e:
-            return jsonify({'success': False, 'message': f'Database error: {str(e)}'})
+            return jsonify({'success': False, 'message': f'Database error: {str(e)}', 'overlay': overlay_data})
     else:
-        # Log failed recognition
-        reason = "unauthorized_attempt" if "Unauthorized attempt" in message else "not_recognized"
-        
-        log_metrics_event_normalized(
-            event="reject_true",
-            attempt_type="impostor",
-            claimed_id=student_id,
-            recognized_id=None,
-            liveness_pass=True,
-            distance=similarity_val,
-            live_prob=float(live_confidence),
-            latency_ms=total_latency_ms,
-            client_ip=request.remote_addr,
-            reason=reason
-        )
-        
-        return jsonify({'success': False, 'message': message})
+        if reason == "false_reject":
+            log_metrics_event_normalized(
+                event="reject_false",
+                attempt_type="genuine",
+                claimed_id=student_id,
+                recognized_id=student_id,
+                liveness_pass=True,
+                distance=distance_val,
+                live_prob=float(live_prob),
+                latency_ms=total_latency_ms,
+                client_ip=client_ip,
+                reason=reason
+            )
+        else:
+            log_metrics_event_normalized(
+                event="reject_true",
+                attempt_type="impostor",
+                claimed_id=student_id,
+                recognized_id=None,
+                liveness_pass=True,
+                distance=distance_val,
+                live_prob=float(live_prob),
+                latency_ms=total_latency_ms,
+                client_ip=client_ip,
+                reason=reason
+            )
+        return jsonify({'success': False, 'message': message, 'overlay': overlay_data})
 
 @app.route('/liveness-preview', methods=['POST'])
 def liveness_preview():
     if 'logged_in' not in session or session.get('user_type') != 'student':
         return jsonify({'success': False, 'message': 'Not logged in'})
-    
     try:
         data = request.json or {}
         face_image = data.get('face_image')
-        
         if not face_image:
             return jsonify({'success': False, 'message': 'No image received'})
         
@@ -779,58 +848,49 @@ def liveness_preview():
         if image is None or image.size == 0:
             return jsonify({'success': False, 'message': 'Invalid image data'})
         
-        # Face detection
-        faces = face_detector.detect_faces(image)
-        if not faces:
+        h, w = image.shape[:2]
+        vis = image.copy()
+        detections = detect_faces_yunet(image)
+        
+        if not detections:
+            overlay_data = image_to_data_uri(vis)
             return jsonify({
                 'success': True,
                 'live': False,
                 'live_prob': 0.0,
-                'message': 'No face detected'
+                'message': 'No face detected',
+                'overlay': overlay_data
             })
         
-        # Get best face and crop
-        best_face = max(faces, key=lambda f: f['confidence'])
-        x, y, x1, y1 = best_face['bbox']
-        
-        padding = 20
-        h, w = image.shape[:2]
-        y_start = max(0, y - padding)
-        y_end = min(h, y1 + padding)
-        x_start = max(0, x - padding)
-        x_end = min(w, x1 + padding)
-        
-        face_crop = image[y_start:y_end, x_start:x_end]
+        best = max(detections, key=lambda d: d["score"])
+        x1, y1, x2, y2 = [int(v) for v in best["bbox"]]
+        x1e, y1e, x2e, y2e = expand_and_clip_box((x1, y1, x2, y2), scale=1.2, w=w, h=h)
+        face_crop = image[y1e:y2e, x1e:x2e]
         
         if face_crop.size == 0:
+            overlay_data = image_to_data_uri(vis)
             return jsonify({
                 'success': True,
                 'live': False,
                 'live_prob': 0.0,
-                'message': 'Failed to crop face'
+                'message': 'Failed to crop face',
+                'overlay': overlay_data
             })
         
-        # Liveness check
-        is_live, live_confidence = anti_spoof.is_live(face_crop)
+        live_prob = simple_liveness_check(face_crop)
+        threshold = 0.7
+        label = "LIVE" if live_prob >= threshold else "SPOOF"
+        color = (0, 200, 0) if label == "LIVE" else (0, 0, 255)
         
-        # Draw rectangle on original image for preview
-        vis = image.copy()
-        color = (0, 255, 0) if is_live else (0, 0, 255)
-        cv2.rectangle(vis, (x, y), (x1, y1), color, 2)
-        
-        label = "LIVE" if is_live else "NOT LIVE"
-        cv2.putText(vis, f"{label} ({live_confidence:.2f})", (x, y-10), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
-        
+        draw_live_overlay(vis, (x1e, y1e, x2e, y2e), label, live_prob, color)
         overlay_data = image_to_data_uri(vis)
         
         return jsonify({
             'success': True,
-            'live': is_live,
-            'live_prob': float(live_confidence),
+            'live': bool(live_prob >= threshold),
+            'live_prob': float(live_prob),
             'overlay': overlay_data
         })
-        
     except Exception as e:
         print("liveness_preview error:", e)
         return jsonify({'success': False, 'message': 'Server error during preview'})
@@ -859,7 +919,6 @@ def teacher_register():
             'password': request.form.get('password'),
             'created_at': datetime.now()
         }
-        
         face_image = request.form.get('face_image')
         if face_image and ',' in face_image:
             image_data = face_image.split(',')[1]
@@ -868,7 +927,6 @@ def teacher_register():
         else:
             flash('Face image is required for registration.', 'danger')
             return redirect(url_for('teacher_register_page'))
-        
         result = teachers_collection.insert_one(teacher_data)
         if result.inserted_id:
             flash('Registration successful! You can now login.', 'success')
@@ -876,7 +934,6 @@ def teacher_register():
         else:
             flash('Registration failed. Please try again.', 'danger')
             return redirect(url_for('teacher_register_page'))
-            
     except pymongo.errors.DuplicateKeyError:
         flash('Teacher ID already exists. Please use a different ID.', 'danger')
         return redirect(url_for('teacher_register_page'))
@@ -889,7 +946,6 @@ def teacher_login():
     teacher_id = request.form.get('teacher_id')
     password = request.form.get('password')
     teacher = teachers_collection.find_one({'teacher_id': teacher_id})
-    
     if teacher and teacher['password'] == password:
         session['logged_in'] = True
         session['user_type'] = 'teacher'
@@ -905,15 +961,12 @@ def teacher_login():
 def teacher_dashboard():
     if 'logged_in' not in session or session.get('user_type') != 'teacher':
         return redirect(url_for('teacher_login_page'))
-    
     teacher_id = session.get('teacher_id')
     teacher = teachers_collection.find_one({'teacher_id': teacher_id})
-    
     if teacher and 'face_image' in teacher and teacher['face_image']:
         face_image_base64 = base64.b64encode(teacher['face_image']).decode('utf-8')
         mime_type = teacher.get('face_image_type', 'image/jpeg')
         teacher['face_image_url'] = f"data:{mime_type};base64,{face_image_base64}"
-    
     return render_template('teacher_dashboard.html', teacher=teacher)
 
 @app.route('/teacher_logout')
@@ -922,29 +975,27 @@ def teacher_logout():
     flash('You have been logged out', 'info')
     return redirect(url_for('teacher_login_page'))
 
+# --------- COMMON LOGOUT ---------
 @app.route('/logout')
 def logout():
     session.clear()
     flash('You have been logged out', 'info')
     return redirect(url_for('login_page'))
 
-# --------- METRICS ENDPOINTS ---------
+# --------- METRICS JSON ENDPOINTS ---------
 @app.route('/metrics-data', methods=['GET'])
 def metrics_data():
     data = compute_metrics()
     recent = list(metrics_events.find({}, {"_id": 0}).sort("ts", -1).limit(200))
-    
     normalized_recent = []
     for r in recent:
         if isinstance(r.get("ts"), datetime):
             r["ts"] = r["ts"].isoformat()
-        
         event, attempt_type = classify_event(r)
         if event and not r.get("event"):
             r["event"] = event
         if attempt_type and not r.get("attempt_type"):
             r["attempt_type"] = attempt_type
-        
         if "liveness_pass" not in r:
             if r.get("decision") == "spoof_blocked":
                 r["liveness_pass"] = False
@@ -952,7 +1003,6 @@ def metrics_data():
                 r["liveness_pass"] = bool(r["live_prob"] >= 0.7)
             else:
                 r["liveness_pass"] = None
-        
         normalized_recent.append(r)
 
     data["recent"] = normalized_recent
@@ -966,7 +1016,6 @@ def metrics_json():
     rates = m["rates"]
     totals = m["totals"]
     avg_latency = compute_latency_avg()
-    
     accuracy_pct = rates["accuracy"] * 100.0
     far_pct = rates["FAR"] * 100.0
     frr_pct = rates["FRR"] * 100.0
@@ -1001,28 +1050,10 @@ def metrics_events_api():
     limit = int(request.args.get("limit", 200))
     cursor = metrics_events.find({}, {"_id": 0}).sort("ts", -1).limit(limit)
     events = list(cursor)
-    
     for ev in events:
         if isinstance(ev.get("ts"), datetime):
             ev["ts"] = ev["ts"].isoformat()
-    
     return jsonify(events)
 
-# Health check route for Coolify
-@app.route('/health')
-def health_check():
-    return jsonify({'status': 'healthy', 'timestamp': datetime.now().isoformat()})
-
-# Error handlers
-@app.errorhandler(404)
-def not_found(error):
-    return render_template('home.html'), 404
-
-@app.errorhandler(500)
-def internal_error(error):
-    return jsonify({'error': 'Internal server error'}), 500
-
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    debug = os.environ.get('FLASK_ENV') == 'development'
-    app.run(debug=debug, host='0.0.0.0', port=port)
+    app.run(debug=True, host='0.0.0.0', port=5000)
