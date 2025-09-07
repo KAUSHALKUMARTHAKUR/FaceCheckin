@@ -38,10 +38,10 @@ inference_times = []
 # Load environment variables
 load_dotenv()
 
-# Initialize Flask app with production configuration
+# Initialize Flask app
 app = Flask(__name__, static_folder='app/static', template_folder='app/templates')
 
-# Production-ready secret key configuration
+# Set secret key
 SECRET_KEY = os.getenv('SECRET_KEY')
 if not SECRET_KEY:
     if os.getenv('FLASK_ENV') == 'production':
@@ -299,20 +299,22 @@ class AntiSpoofBinary:
         img = img.astype(np.float32) / 255.0
         if self.normalize:
             img = (img - self.mean) / self.std
-        blob = cv2.dnn.blobFromImage(img, 1.0, (self.input_size, self.input_size), swapRB=False)
-        return blob
+        img = np.transpose(img, (2, 0, 1))
+        img = np.expand_dims(img, 0).astype(np.float32)
+        return img
 
     def predict_live_prob(self, face_bgr: np.ndarray) -> float:
         """Predict liveness probability using OpenCV DNN"""
         try:
             inp = self._preprocess(face_bgr)
             
-            # Run inference
-            self.net.setInput(inp)
-            out = self.net.forward()[0]
+            # Create blob and run inference
+            blob = cv2.dnn.blobFromImage(face_bgr, 1/255.0, (self.input_size, self.input_size), swapRB=True, crop=False)
+            self.net.setInput(blob)
+            out = self.net.forward()
             
             if out.ndim > 1:
-                out = np.squeeze(out)
+                out = np.squeeze(out, axis=0)
             
             if out.size == 2:
                 # Softmax for 2-class output
@@ -528,7 +530,7 @@ def recognize_face(image, user_id, user_type='student'):
         logger.error(f"Error in face recognition: {e}")
         return False, f"Error in face recognition: {str(e)}"
 
-# Metrics helpers (keeping your existing implementation)
+# Metrics helpers
 def log_metrics_event(event: dict):
     if not client:
         logger.warning("Cannot log metrics event - no database connection")
@@ -1209,3 +1211,216 @@ def liveness_preview():
                     'message': 'No face detected',
                     'overlay': overlay_data
                 })
+    except Exception as e:
+        logger.error(f"Liveness preview error: {e}")
+        return jsonify({'success': False, 'message': 'Server error during preview'})
+
+# --------- TEACHER ROUTES ---------
+@app.route('/teacher_register.html')
+def teacher_register_page():
+    return render_template('teacher_register.html')
+
+@app.route('/teacher_login.html')
+def teacher_login_page():
+    return render_template('teacher_login.html')
+
+@app.route('/teacher_register', methods=['POST'])
+def teacher_register():
+    if not client:
+        flash('Service temporarily unavailable. Please try again later.', 'danger')
+        return redirect(url_for('teacher_register_page'))
+        
+    try:
+        teacher_data = {
+            'teacher_id': request.form.get('teacher_id'),
+            'name': request.form.get('name'),
+            'email': request.form.get('email'),
+            'department': request.form.get('department'),
+            'designation': request.form.get('designation'),
+            'mobile': request.form.get('mobile'),
+            'dob': request.form.get('dob'),
+            'gender': request.form.get('gender'),
+            'password': request.form.get('password'),
+            'created_at': datetime.now()
+        }
+        face_image = request.form.get('face_image')
+        if face_image and ',' in face_image:
+            image_data = face_image.split(',')[1]
+            teacher_data['face_image'] = Binary(base64.b64decode(image_data))
+            teacher_data['face_image_type'] = face_image.split(',')[0].split(':')[1].split(';')[0]
+        else:
+            flash('Face image is required for registration.', 'danger')
+            return redirect(url_for('teacher_register_page'))
+            
+        result = teachers_collection.insert_one(teacher_data)
+        if result.inserted_id:
+            flash('Registration successful! You can now login.', 'success')
+            return redirect(url_for('teacher_login_page'))
+        else:
+            flash('Registration failed. Please try again.', 'danger')
+            return redirect(url_for('teacher_register_page'))
+    except pymongo.errors.DuplicateKeyError:
+        flash('Teacher ID already exists. Please use a different ID.', 'danger')
+        return redirect(url_for('teacher_register_page'))
+    except Exception as e:
+        logger.error(f"Teacher registration error: {e}")
+        flash(f'Registration failed: {str(e)}', 'danger')
+        return redirect(url_for('teacher_register_page'))
+
+@app.route('/teacher_login', methods=['POST'])
+def teacher_login():
+    if not client:
+        flash('Service temporarily unavailable. Please try again later.', 'danger')
+        return redirect(url_for('teacher_login_page'))
+        
+    try:
+        teacher_id = request.form.get('teacher_id')
+        password = request.form.get('password')
+        teacher = teachers_collection.find_one({'teacher_id': teacher_id})
+        if teacher and teacher.get('password') == password:
+            session['logged_in'] = True
+            session['user_type'] = 'teacher'
+            session['teacher_id'] = teacher_id
+            session['name'] = teacher.get('name')
+            flash('Login successful!', 'success')
+            return redirect(url_for('teacher_dashboard'))
+        else:
+            flash('Invalid credentials. Please try again.', 'danger')
+            return redirect(url_for('teacher_login_page'))
+    except Exception as e:
+        logger.error(f"Teacher login error: {e}")
+        flash('Login failed. Please try again.', 'danger')
+        return redirect(url_for('teacher_login_page'))
+
+@app.route('/teacher_dashboard')
+def teacher_dashboard():
+    if 'logged_in' not in session or session.get('user_type') != 'teacher':
+        return redirect(url_for('teacher_login_page'))
+    
+    if not client:
+        flash('Service temporarily unavailable.', 'danger')
+        return redirect(url_for('teacher_login_page'))
+        
+    try:
+        teacher_id = session.get('teacher_id')
+        teacher = teachers_collection.find_one({'teacher_id': teacher_id})
+        if teacher and 'face_image' in teacher and teacher['face_image']:
+            face_image_base64 = base64.b64encode(teacher['face_image']).decode('utf-8')
+            mime_type = teacher.get('face_image_type', 'image/jpeg')
+            teacher['face_image_url'] = f"data:{mime_type};base64,{face_image_base64}"
+        return render_template('teacher_dashboard.html', teacher=teacher)
+    except Exception as e:
+        logger.error(f"Teacher dashboard error: {e}")
+        flash('Error loading dashboard.', 'danger')
+        return redirect(url_for('teacher_login_page'))
+
+@app.route('/teacher_logout')
+def teacher_logout():
+    session.clear()
+    flash('You have been logged out', 'info')
+    return redirect(url_for('teacher_login_page'))
+
+# --------- COMMON LOGOUT ---------
+@app.route('/logout')
+def logout():
+    session.clear()
+    flash('You have been logged out', 'info')
+    return redirect(url_for('login_page'))
+
+# --------- METRICS JSON ENDPOINTS ---------
+@app.route('/metrics-data', methods=['GET'])
+def metrics_data():
+    try:
+        data = compute_metrics()
+        if client:
+            recent = list(metrics_events.find({}, {"_id": 0}).sort("ts", -1).limit(200))
+            normalized_recent = []
+            for r in recent:
+                if isinstance(r.get("ts"), datetime):
+                    r["ts"] = r["ts"].isoformat()
+                event, attempt_type = classify_event(r)
+                if event and not r.get("event"):
+                    r["event"] = event
+                if attempt_type and not r.get("attempt_type"):
+                    r["attempt_type"] = attempt_type
+                if "liveness_pass" not in r:
+                    if r.get("decision") == "spoof_blocked":
+                        r["liveness_pass"] = False
+                    elif isinstance(r.get("live_prob"), (int, float)):
+                        r["liveness_pass"] = bool(r["live_prob"] >= 0.7)
+                    else:
+                        r["liveness_pass"] = None
+                normalized_recent.append(r)
+            data["recent"] = normalized_recent
+        else:
+            data["recent"] = []
+        data["avg_latency_ms"] = compute_latency_avg()
+        return jsonify(data)
+    except Exception as e:
+        logger.error(f"Metrics data error: {e}")
+        return jsonify({'error': 'Unable to retrieve metrics data'}), 500
+
+@app.route('/metrics-json')
+def metrics_json():
+    try:
+        m = compute_metrics()
+        counts = m["counts"]
+        rates = m["rates"]
+        totals = m["totals"]
+        avg_latency = compute_latency_avg()
+        accuracy_pct = rates["accuracy"] * 100.0
+        far_pct = rates["FAR"] * 100.0
+        frr_pct = rates["FRR"] * 100.0
+
+        return jsonify({
+            'Accuracy': f"{accuracy_pct:.2f}%" if totals["totalAttempts"] > 0 else "N/A",
+            'False Accepts (FAR)': f"{far_pct:.2f}%" if counts["impostorAttempts"] > 0 else "N/A",
+            'False Rejects (FRR)': f"{frr_pct:.2f}%" if counts["genuineAttempts"] > 0 else "N/A",
+            'Average Inference Time (s)': f"{(avg_latency/1000.0):.2f}" if isinstance(avg_latency, (int, float)) else "N/A",
+            'Correct Recognitions': counts["trueAccepts"],
+            'Total Attempts': totals["totalAttempts"],
+            'Unauthorized Attempts': counts["unauthorizedRejected"],
+            'enhanced': {
+                'totals': {
+                    'attempts': totals["totalAttempts"],
+                    'trueAccepts': counts["trueAccepts"],
+                    'falseAccepts': counts["falseAccepts"],
+                    'trueRejects': counts["trueRejects"],
+                    'falseRejects': counts["falseRejects"],
+                    'genuineAttempts': counts["genuineAttempts"],
+                    'impostorAttempts': counts["impostorAttempts"],
+                    'unauthorizedRejected': counts["unauthorizedRejected"],
+                    'unauthorizedAccepted': counts["unauthorizedAccepted"],
+                },
+                'accuracy_pct': round(accuracy_pct, 2),
+                'avg_latency_ms': round(avg_latency, 2) if isinstance(avg_latency, (int, float)) else None
+            }
+        })
+    except Exception as e:
+        logger.error(f"Metrics JSON error: {e}")
+        return jsonify({'error': 'Unable to compute metrics'}), 500
+
+@app.route('/metrics-events')
+def metrics_events_api():
+    try:
+        limit = int(request.args.get("limit", 200))
+        if client:
+            cursor = metrics_events.find({}, {"_id": 0}).sort("ts", -1).limit(limit)
+            events = list(cursor)
+            for ev in events:
+                if isinstance(ev.get("ts"), datetime):
+                    ev["ts"] = ev["ts"].isoformat()
+            return jsonify(events)
+        else:
+            return jsonify([])
+    except Exception as e:
+        logger.error(f"Metrics events error: {e}")
+        return jsonify({'error': 'Unable to retrieve metrics events'}), 500
+
+# Production-ready app configuration
+if __name__ == '__main__':
+    # Only run in development
+    if os.getenv('FLASK_ENV') != 'production':
+        app.run(debug=True, host='0.0.0.0', port=5000)
+    else:
+        logger.info("Application started in production mode")
