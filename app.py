@@ -1,5 +1,7 @@
 from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
 import os
+import gc
+import logging
 import time
 import uuid
 import pymongo
@@ -10,12 +12,19 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 import numpy as np
 import cv2
-from deepface import DeepFace
-import mediapipe as mp
 from typing import Optional, Dict, Tuple, Any
 import tempfile
 import atexit
 import shutil
+
+# Optimize memory usage and disable TensorFlow warnings
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+os.environ['OMP_NUM_THREADS'] = '1'
+
+# Configure logging for production
+logging.basicConfig(level=logging.WARNING)
+logging.getLogger('tensorflow').setLevel(logging.ERROR)
 
 # --- Evaluation Metrics Counters (legacy, kept for compatibility display) ---
 total_attempts = 0
@@ -41,23 +50,30 @@ def cleanup_temp_dir():
     try:
         if os.path.exists(TEMP_DIR):
             shutil.rmtree(TEMP_DIR)
+        gc.collect()  # Force garbage collection
     except Exception as e:
         print(f"Error cleaning up temp directory: {e}")
 
 # Register cleanup function
 atexit.register(cleanup_temp_dir)
 
-# MongoDB Connection
+# MongoDB Connection with connection pooling
 try:
     mongo_uri = os.getenv('MONGO_URI', 'mongodb://localhost:27017/')
-    client = MongoClient(mongo_uri)
+    client = MongoClient(
+        mongo_uri,
+        maxPoolSize=10,
+        connectTimeoutMS=5000,
+        socketTimeoutMS=5000,
+        serverSelectionTimeoutMS=5000
+    )
     db = client['face_attendance_system']
     students_collection = db['students']
     teachers_collection = db['teachers']
     attendance_collection = db['attendance']
     metrics_events = db['metrics_events']
 
-    # Indexes
+    # Create indexes for better performance
     students_collection.create_index([("student_id", pymongo.ASCENDING)], unique=True)
     teachers_collection.create_index([("teacher_id", pymongo.ASCENDING)], unique=True)
     attendance_collection.create_index([
@@ -72,9 +88,9 @@ try:
 except Exception as e:
     print(f"MongoDB connection error: {e}")
 
-# ---------------- Reliable Face Detection Implementation ----------------
+# ---------------- Memory-Optimized Face Detection ----------------
 
-# Initialize Haar Cascade Face Detector (most reliable for cloud deployment)
+# Initialize Haar Cascade Face Detector (lightweight and reliable)
 face_detector = None
 try:
     face_detector = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
@@ -82,30 +98,7 @@ try:
 except Exception as e:
     print(f"Error initializing face detector: {e}")
 
-# Initialize MediaPipe Face Detection (backup option)
-mp_face_detection = None
-try:
-    import mediapipe as mp
-    mp_face_detection = mp.solutions.face_detection
-    print("MediaPipe face detection available")
-except Exception as e:
-    print(f"MediaPipe face detection not available: {e}")
-
-# Initialize MediaPipe Face Mesh
-face_mesh = None
-try:
-    mp_face_mesh = mp.solutions.face_mesh
-    face_mesh = mp_face_mesh.FaceMesh(
-        static_image_mode=False,
-        max_num_faces=1,
-        refine_landmarks=True,
-        min_detection_confidence=0.5
-    )
-    print("MediaPipe Face Mesh initialized successfully")
-except Exception as e:
-    print(f"Error initializing MediaPipe: {e}")
-
-# Initialize Haar Cascade for simple liveness detection
+# Initialize eye cascade for liveness detection
 eye_cascade = None
 try:
     eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_eye.xml')
@@ -120,7 +113,7 @@ def get_unique_temp_path(prefix="temp", suffix=".jpg"):
     return os.path.join(TEMP_DIR, filename)
 
 def detect_faces_haar(image):
-    """Detect faces using Haar cascade - most reliable method"""
+    """Detect faces using Haar cascade - memory efficient"""
     try:
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         faces = face_detector.detectMultiScale(
@@ -136,57 +129,23 @@ def detect_faces_haar(image):
                 "bbox": [x, y, x + w, y + h],
                 "score": 0.9
             })
+        
+        # Clean up memory
+        del gray
+        gc.collect()
         return detections
     except Exception as e:
         print(f"Error in Haar cascade detection: {e}")
         return []
 
-def detect_faces_mediapipe(image):
-    """Detect faces using MediaPipe as backup"""
-    if mp_face_detection is None:
-        return []
-    
-    try:
-        with mp_face_detection.FaceDetection(model_selection=0, min_detection_confidence=0.5) as face_detection:
-            rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            results = face_detection.process(rgb_image)
-            
-            detections = []
-            if results.detections:
-                h, w = image.shape[:2]
-                for detection in results.detections:
-                    bbox = detection.location_data.relative_bounding_box
-                    x1 = int(bbox.xmin * w)
-                    y1 = int(bbox.ymin * h)
-                    x2 = int((bbox.xmin + bbox.width) * w)
-                    y2 = int((bbox.ymin + bbox.height) * h)
-                    
-                    detections.append({
-                        "bbox": [x1, y1, x2, y2],
-                        "score": detection.score[0]
-                    })
-            return detections
-    except Exception as e:
-        print(f"Error in MediaPipe detection: {e}")
-        return []
-
 def detect_faces_yunet(image):
-    """Unified face detection function with reliable methods"""
-    # Try Haar cascade first (most reliable)
+    """Unified face detection function - memory optimized"""
     if face_detector is not None:
-        detections = detect_faces_haar(image)
-        if detections:
-            return detections
+        return detect_faces_haar(image)
     
-    # Fallback to MediaPipe if available
-    detections = detect_faces_mediapipe(image)
-    if detections:
-        return detections
-    
-    # Final fallback - simple contour detection
+    # Final fallback
     try:
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        # Use built-in face cascade as last resort
         face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
         faces = face_cascade.detectMultiScale(gray, 1.3, 5)
         
@@ -196,21 +155,27 @@ def detect_faces_yunet(image):
                 "bbox": [x, y, x + w, y + h],
                 "score": 0.8
             })
+        
+        del gray
+        gc.collect()
         return detections
     except Exception as e:
-        print(f"Error in final fallback detection: {e}")
+        print(f"Error in fallback detection: {e}")
         return []
 
 def recognize_face_deepface(image, user_id, user_type='student'):
-    """Face recognition using DeepFace (lightweight alternative) - optimized for Render"""
+    """Memory-optimized face recognition using DeepFace"""
     global total_attempts, correct_recognitions, unauthorized_attempts, inference_times
     
-    temp_files = []  # Track temp files for cleanup
+    temp_files = []
     
     try:
+        # Lazy import DeepFace to save memory at startup
+        from deepface import DeepFace
+        
         start_time = time.time()
         
-        # Save current image temporarily with unique filename
+        # Save current image temporarily
         temp_img_path = get_unique_temp_path(f"current_{user_id}")
         temp_files.append(temp_img_path)
         cv2.imwrite(temp_img_path, image)
@@ -225,7 +190,7 @@ def recognize_face_deepface(image, user_id, user_type='student'):
             unauthorized_attempts += 1
             return False, f"No reference face found for {user_type} ID {user_id}"
         
-        # Save reference image temporarily with unique filename
+        # Save reference image temporarily
         ref_image_bytes = user['face_image']
         ref_image_array = np.frombuffer(ref_image_bytes, np.uint8)
         ref_image = cv2.imdecode(ref_image_array, cv2.IMREAD_COLOR)
@@ -233,12 +198,15 @@ def recognize_face_deepface(image, user_id, user_type='student'):
         temp_files.append(temp_ref_path)
         cv2.imwrite(temp_ref_path, ref_image)
         
+        # Clean up arrays immediately
+        del ref_image_array, ref_image
+        
         try:
-            # Use DeepFace for verification
+            # Use lighter DeepFace model for memory efficiency
             result = DeepFace.verify(
                 img1_path=temp_img_path,
                 img2_path=temp_ref_path,
-                model_name="Facenet512",  # Lightweight model
+                model_name="Facenet",  # Lighter than Facenet512
                 enforce_detection=False
             )
             
@@ -263,34 +231,19 @@ def recognize_face_deepface(image, user_id, user_type='student'):
         return False, f"Error in face recognition: {str(e)}"
     
     finally:
-        # Clean up temporary files
+        # Clean up temporary files and memory
         for temp_file in temp_files:
             try:
                 if os.path.exists(temp_file):
                     os.remove(temp_file)
             except Exception as e:
                 print(f"Error cleaning up temp file {temp_file}: {e}")
-
-def get_face_landmarks_mediapipe(image):
-    """Get face landmarks using MediaPipe"""
-    if face_mesh is None:
-        return None
-    
-    try:
-        rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        results = face_mesh.process(rgb_image)
-        
-        if results.multi_face_landmarks:
-            return results.multi_face_landmarks[0]
-        return None
-    except Exception as e:
-        print(f"Error in MediaPipe landmarks: {e}")
-        return None
+        gc.collect()
 
 def simple_liveness_check(image):
-    """Simple liveness detection using eye detection"""
+    """Simple liveness detection using eye detection - memory optimized"""
     if eye_cascade is None:
-        return 0.5  # Default moderate score if cascade not available
+        return 0.7  # Default score if cascade not available
     
     try:
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -298,14 +251,22 @@ def simple_liveness_check(image):
         
         # Simple liveness scoring based on eye detection
         if len(eyes) >= 2:
-            return 0.8  # High confidence if both eyes detected
+            score = 0.8  # High confidence if both eyes detected
         elif len(eyes) == 1:
-            return 0.6  # Medium confidence if one eye detected
+            score = 0.6  # Medium confidence if one eye detected
         else:
-            return 0.3  # Low confidence if no eyes detected
+            score = 0.4  # Low confidence if no eyes detected
+        
+        # Clean up memory
+        del gray
+        gc.collect()
+        return score
+        
     except Exception as e:
         print(f"Error in liveness check: {e}")
         return 0.5
+    finally:
+        gc.collect()
 
 def expand_and_clip_box(bbox_xyxy, scale: float, w: int, h: int):
     x1, y1, x2, y2 = bbox_xyxy
@@ -343,12 +304,16 @@ def decode_image(base64_image):
     image_bytes = base64.b64decode(base64_image)
     np_array = np.frombuffer(image_bytes, np.uint8)
     image = cv2.imdecode(np_array, cv2.IMREAD_COLOR)
+    
+    # Clean up memory
+    del image_bytes, np_array
+    gc.collect()
     return image
 
 # Legacy function for backward compatibility
 def get_face_features(image):
     """Legacy wrapper - now uses DeepFace internally"""
-    return None  # DeepFace handles feature extraction internally
+    return None
 
 def recognize_face(image, user_id, user_type='student'):
     """Legacy wrapper for the new DeepFace recognition"""
@@ -608,6 +573,8 @@ def face_login():
     cv2.imwrite(temp_login_path, image)
     
     try:
+        from deepface import DeepFace
+        
         for user in users:
             ref_image_bytes = user['face_image']
             ref_image_array = np.frombuffer(ref_image_bytes, np.uint8)
@@ -620,7 +587,7 @@ def face_login():
                 result = DeepFace.verify(
                     img1_path=temp_login_path,
                     img2_path=temp_ref_path,
-                    model_name="Facenet512",
+                    model_name="Facenet",
                     enforce_detection=False
                 )
                 
@@ -635,6 +602,7 @@ def face_login():
                     for temp_file in [temp_ref_path, temp_login_path]:
                         if os.path.exists(temp_file):
                             os.remove(temp_file)
+                    gc.collect()
                     return redirect(url_for(dashboard_route))
                 
                 if os.path.exists(temp_ref_path):
@@ -650,6 +618,8 @@ def face_login():
     except Exception as e:
         if os.path.exists(temp_login_path):
             os.remove(temp_login_path)
+    finally:
+        gc.collect()
 
     flash('Face not recognized. Please try again or contact admin.', 'danger')
     return redirect(url_for('login_page'))
@@ -680,6 +650,8 @@ def auto_face_login():
         cv2.imwrite(temp_auto_path, image)
         
         try:
+            from deepface import DeepFace
+            
             users = collection.find({'face_image': {'$exists': True, '$ne': None}})
             for user in users:
                 try:
@@ -692,7 +664,7 @@ def auto_face_login():
                     result = DeepFace.verify(
                         img1_path=temp_auto_path,
                         img2_path=temp_ref_path,
-                        model_name="Facenet512",
+                        model_name="Facenet",
                         enforce_detection=False
                     )
                     
@@ -707,6 +679,7 @@ def auto_face_login():
                             if os.path.exists(temp_file):
                                 os.remove(temp_file)
                         
+                        gc.collect()
                         return jsonify({
                             'success': True,
                             'message': f'Welcome {user["name"]}! Redirecting...',
@@ -725,6 +698,8 @@ def auto_face_login():
         except Exception as e:
             if os.path.exists(temp_auto_path):
                 os.remove(temp_auto_path)
+        finally:
+            gc.collect()
 
         return jsonify({'success': False, 'message': f'Face not recognized in {face_role} database'})
     except Exception as e:
@@ -902,6 +877,7 @@ def mark_attendance():
             if existing_attendance:
                 return jsonify({'success': False, 'message': 'Attendance already marked for this course today', 'overlay': overlay_data})
             attendance_collection.insert_one(attendance_data)
+            gc.collect()  # Clean up memory after successful operation
             return jsonify({'success': True, 'message': 'Attendance marked successfully', 'overlay': overlay_data})
         except Exception as e:
             return jsonify({'success': False, 'message': f'Database error: {str(e)}', 'overlay': overlay_data})
@@ -984,6 +960,10 @@ def liveness_preview():
         
         draw_live_overlay(vis, (x1e, y1e, x2e, y2e), label, live_prob, color)
         overlay_data = image_to_data_uri(vis)
+        
+        # Clean up memory
+        del image, vis, face_crop
+        gc.collect()
         
         return jsonify({
             'success': True,
@@ -1164,11 +1144,26 @@ def metrics_events_api():
         print(f"Error getting metrics events: {e}")
         return jsonify([])
 
-# Health check endpoint for Render
+# Health check endpoint for Coolify/Docker
 @app.route('/health')
 def health_check():
-    return jsonify({'status': 'healthy'}), 200
+    return jsonify({
+        'status': 'healthy',
+        'memory': 'optimized',
+        'face_detector': 'haar_cascade',
+        'timestamp': datetime.now().isoformat()
+    }), 200
+
+# Cleanup function to be called periodically
+@app.route('/cleanup', methods=['POST'])
+def manual_cleanup():
+    """Manual cleanup endpoint for memory management"""
+    try:
+        gc.collect()
+        return jsonify({'status': 'cleanup completed'}), 200
+    except Exception as e:
+        return jsonify({'status': 'cleanup failed', 'error': str(e)}), 500
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
+    port = int(os.environ.get('PORT', 8000))
     app.run(host='0.0.0.0', port=port, debug=False)
