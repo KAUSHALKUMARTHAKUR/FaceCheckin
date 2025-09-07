@@ -1,6 +1,7 @@
 from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
 import os
 import time
+import uuid
 import pymongo
 from pymongo import MongoClient
 from bson.binary import Binary
@@ -12,6 +13,9 @@ import cv2
 from deepface import DeepFace
 import mediapipe as mp
 from typing import Optional, Dict, Tuple, Any
+import tempfile
+import atexit
+import shutil
 
 # --- Evaluation Metrics Counters (legacy, kept for compatibility display) ---
 total_attempts = 0
@@ -27,7 +31,21 @@ load_dotenv()
 
 # Initialize Flask app
 app = Flask(__name__, static_folder='app/static', template_folder='app/templates')
-app.secret_key = os.urandom(24)
+app.secret_key = os.environ.get('SECRET_KEY', os.urandom(24))
+
+# Create temporary directory for image processing
+TEMP_DIR = tempfile.mkdtemp()
+
+def cleanup_temp_dir():
+    """Clean up temporary directory on exit"""
+    try:
+        if os.path.exists(TEMP_DIR):
+            shutil.rmtree(TEMP_DIR)
+    except Exception as e:
+        print(f"Error cleaning up temp directory: {e}")
+
+# Register cleanup function
+atexit.register(cleanup_temp_dir)
 
 # MongoDB Connection
 try:
@@ -57,6 +75,7 @@ except Exception as e:
 # ---------------- Lightweight Model Implementations ----------------
 
 # Initialize YuNet Face Detector (OpenCV built-in)
+face_detector = None
 try:
     face_detector = cv2.FaceDetectorYN.create(
         model="",  # Uses built-in model
@@ -66,9 +85,9 @@ try:
     print("YuNet face detector initialized successfully")
 except Exception as e:
     print(f"Error initializing YuNet: {e}")
-    face_detector = None
 
 # Initialize MediaPipe Face Mesh
+face_mesh = None
 try:
     mp_face_mesh = mp.solutions.face_mesh
     face_mesh = mp_face_mesh.FaceMesh(
@@ -80,15 +99,20 @@ try:
     print("MediaPipe Face Mesh initialized successfully")
 except Exception as e:
     print(f"Error initializing MediaPipe: {e}")
-    face_mesh = None
 
 # Initialize Haar Cascade for simple liveness detection
+eye_cascade = None
 try:
     eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_eye.xml')
     print("Eye cascade classifier initialized successfully")
 except Exception as e:
     print(f"Error initializing eye cascade: {e}")
-    eye_cascade = None
+
+def get_unique_temp_path(prefix="temp", suffix=".jpg"):
+    """Generate unique temporary file path"""
+    unique_id = str(uuid.uuid4())
+    filename = f"{prefix}_{unique_id}_{int(time.time())}{suffix}"
+    return os.path.join(TEMP_DIR, filename)
 
 def detect_faces_yunet(image):
     """Detect faces using YuNet (lightweight OpenCV detector)"""
@@ -121,14 +145,17 @@ def detect_faces_yunet(image):
         return []
 
 def recognize_face_deepface(image, user_id, user_type='student'):
-    """Face recognition using DeepFace (lightweight alternative)"""
+    """Face recognition using DeepFace (lightweight alternative) - optimized for Render"""
     global total_attempts, correct_recognitions, unauthorized_attempts, inference_times
+    
+    temp_files = []  # Track temp files for cleanup
     
     try:
         start_time = time.time()
         
-        # Save current image temporarily for DeepFace
-        temp_img_path = f"temp_current_{user_id}.jpg"
+        # Save current image temporarily with unique filename
+        temp_img_path = get_unique_temp_path(f"current_{user_id}")
+        temp_files.append(temp_img_path)
         cv2.imwrite(temp_img_path, image)
         
         # Get user's reference image
@@ -139,16 +166,14 @@ def recognize_face_deepface(image, user_id, user_type='student'):
         
         if not user or 'face_image' not in user:
             unauthorized_attempts += 1
-            # Clean up temp file
-            if os.path.exists(temp_img_path):
-                os.remove(temp_img_path)
             return False, f"No reference face found for {user_type} ID {user_id}"
         
-        # Save reference image temporarily
+        # Save reference image temporarily with unique filename
         ref_image_bytes = user['face_image']
         ref_image_array = np.frombuffer(ref_image_bytes, np.uint8)
         ref_image = cv2.imdecode(ref_image_array, cv2.IMREAD_COLOR)
-        temp_ref_path = f"temp_ref_{user_id}.jpg"
+        temp_ref_path = get_unique_temp_path(f"ref_{user_id}")
+        temp_files.append(temp_ref_path)
         cv2.imwrite(temp_ref_path, ref_image)
         
         try:
@@ -177,14 +202,17 @@ def recognize_face_deepface(image, user_id, user_type='student'):
         except Exception as e:
             return False, f"DeepFace verification error: {str(e)}"
         
-        finally:
-            # Clean up temporary files
-            for temp_file in [temp_img_path, temp_ref_path]:
-                if os.path.exists(temp_file):
-                    os.remove(temp_file)
-    
     except Exception as e:
         return False, f"Error in face recognition: {str(e)}"
+    
+    finally:
+        # Clean up temporary files
+        for temp_file in temp_files:
+            try:
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
+            except Exception as e:
+                print(f"Error cleaning up temp file {temp_file}: {e}")
 
 def get_face_landmarks_mediapipe(image):
     """Get face landmarks using MediaPipe"""
@@ -343,68 +371,81 @@ def classify_event(ev: Dict[str, Any]) -> Tuple[Optional[str], Optional[str]]:
 
 def compute_metrics(limit: int = 10000):
     """Robust metrics aggregation that tolerates legacy docs."""
-    cursor = metrics_events.find({}, {"_id": 0}).sort("ts", -1).limit(limit)
-    counts = {
-        "trueAccepts": 0,
-        "falseAccepts": 0,
-        "trueRejects": 0,
-        "falseRejects": 0,
-        "genuineAttempts": 0,
-        "impostorAttempts": 0,
-        "unauthorizedRejected": 0,
-        "unauthorizedAccepted": 0,
-    }
-
-    total_attempts_calc = 0
-
-    for ev in cursor:
-        e, at = classify_event(ev)
-        if not e:
-            continue
-        total_attempts_calc += 1
-
-        if e == "accept_true":
-            counts["trueAccepts"] += 1
-        elif e == "accept_false":
-            counts["falseAccepts"] += 1
-            counts["unauthorizedAccepted"] += 1
-        elif e == "reject_true":
-            counts["trueRejects"] += 1
-            counts["unauthorizedRejected"] += 1
-        elif e == "reject_false":
-            counts["falseRejects"] += 1
-
-        if at == "genuine":
-            counts["genuineAttempts"] += 1
-        elif at == "impostor":
-            counts["impostorAttempts"] += 1
-
-    genuine_attempts = max(counts["genuineAttempts"], 1)
-    impostor_attempts = max(counts["impostorAttempts"], 1)
-    total_attempts_final = max(total_attempts_calc, 1)
-
-    FAR = counts["falseAccepts"] / impostor_attempts
-    FRR = counts["falseRejects"] / genuine_attempts
-    accuracy = (counts["trueAccepts"] + counts["trueRejects"]) / total_attempts_final
-
-    return {
-        "counts": counts,
-        "rates": {
-            "FAR": FAR,
-            "FRR": FRR,
-            "accuracy": accuracy
-        },
-        "totals": {
-            "totalAttempts": total_attempts_calc
+    try:
+        cursor = metrics_events.find({}, {"_id": 0}).sort("ts", -1).limit(limit)
+        counts = {
+            "trueAccepts": 0,
+            "falseAccepts": 0,
+            "trueRejects": 0,
+            "falseRejects": 0,
+            "genuineAttempts": 0,
+            "impostorAttempts": 0,
+            "unauthorizedRejected": 0,
+            "unauthorizedAccepted": 0,
         }
-    }
+
+        total_attempts_calc = 0
+
+        for ev in cursor:
+            e, at = classify_event(ev)
+            if not e:
+                continue
+            total_attempts_calc += 1
+
+            if e == "accept_true":
+                counts["trueAccepts"] += 1
+            elif e == "accept_false":
+                counts["falseAccepts"] += 1
+                counts["unauthorizedAccepted"] += 1
+            elif e == "reject_true":
+                counts["trueRejects"] += 1
+                counts["unauthorizedRejected"] += 1
+            elif e == "reject_false":
+                counts["falseRejects"] += 1
+
+            if at == "genuine":
+                counts["genuineAttempts"] += 1
+            elif at == "impostor":
+                counts["impostorAttempts"] += 1
+
+        genuine_attempts = max(counts["genuineAttempts"], 1)
+        impostor_attempts = max(counts["impostorAttempts"], 1)
+        total_attempts_final = max(total_attempts_calc, 1)
+
+        FAR = counts["falseAccepts"] / impostor_attempts
+        FRR = counts["falseRejects"] / genuine_attempts
+        accuracy = (counts["trueAccepts"] + counts["trueRejects"]) / total_attempts_final
+
+        return {
+            "counts": counts,
+            "rates": {
+                "FAR": FAR,
+                "FRR": FRR,
+                "accuracy": accuracy
+            },
+            "totals": {
+                "totalAttempts": total_attempts_calc
+            }
+        }
+    except Exception as e:
+        print(f"Error computing metrics: {e}")
+        return {
+            "counts": {"trueAccepts": 0, "falseAccepts": 0, "trueRejects": 0, "falseRejects": 0,
+                      "genuineAttempts": 0, "impostorAttempts": 0, "unauthorizedRejected": 0, "unauthorizedAccepted": 0},
+            "rates": {"FAR": 0, "FRR": 0, "accuracy": 0},
+            "totals": {"totalAttempts": 0}
+        }
 
 def compute_latency_avg(limit: int = 300) -> Optional[float]:
-    cursor = metrics_events.find({"latency_ms": {"$exists": True}}, {"latency_ms": 1, "_id": 0}).sort("ts", -1).limit(limit)
-    vals = [float(d["latency_ms"]) for d in cursor if isinstance(d.get("latency_ms"), (int, float))]
-    if not vals:
+    try:
+        cursor = metrics_events.find({"latency_ms": {"$exists": True}}, {"latency_ms": 1, "_id": 0}).sort("ts", -1).limit(limit)
+        vals = [float(d["latency_ms"]) for d in cursor if isinstance(d.get("latency_ms"), (int, float))]
+        if not vals:
+            return None
+        return sum(vals) / len(vals)
+    except Exception as e:
+        print(f"Error computing latency average: {e}")
         return None
-    return sum(vals) / len(vals)
 
 # --------- STUDENT ROUTES ---------
 @app.route('/')
@@ -505,8 +546,8 @@ def face_login():
 
     users = collection.find({'face_image': {'$exists': True, '$ne': None}})
     
-    # Use DeepFace for face matching
-    temp_login_path = "temp_login_image.jpg"
+    # Use DeepFace for face matching with improved temp file handling
+    temp_login_path = get_unique_temp_path("login_image")
     cv2.imwrite(temp_login_path, image)
     
     try:
@@ -515,7 +556,7 @@ def face_login():
             ref_image_array = np.frombuffer(ref_image_bytes, np.uint8)
             ref_image = cv2.imdecode(ref_image_array, cv2.IMREAD_COLOR)
             
-            temp_ref_path = f"temp_ref_{user[id_field]}.jpg"
+            temp_ref_path = get_unique_temp_path(f"ref_{user[id_field]}")
             cv2.imwrite(temp_ref_path, ref_image)
             
             try:
@@ -534,11 +575,13 @@ def face_login():
                     flash('Face login successful!', 'success')
                     
                     # Cleanup
-                    os.remove(temp_ref_path)
-                    os.remove(temp_login_path)
+                    for temp_file in [temp_ref_path, temp_login_path]:
+                        if os.path.exists(temp_file):
+                            os.remove(temp_file)
                     return redirect(url_for(dashboard_route))
                 
-                os.remove(temp_ref_path)
+                if os.path.exists(temp_ref_path):
+                    os.remove(temp_ref_path)
             except Exception as e:
                 if os.path.exists(temp_ref_path):
                     os.remove(temp_ref_path)
@@ -575,8 +618,8 @@ def auto_face_login():
             id_field = 'student_id'
             dashboard_route = '/dashboard'
 
-        # Use DeepFace for recognition
-        temp_auto_path = "temp_auto_login.jpg"
+        # Use DeepFace for recognition with improved temp file handling
+        temp_auto_path = get_unique_temp_path("auto_login")
         cv2.imwrite(temp_auto_path, image)
         
         try:
@@ -586,7 +629,7 @@ def auto_face_login():
                     ref_image_array = np.frombuffer(user['face_image'], np.uint8)
                     ref_image = cv2.imdecode(ref_image_array, cv2.IMREAD_COLOR)
                     
-                    temp_ref_path = f"temp_auto_ref_{user[id_field]}.jpg"
+                    temp_ref_path = get_unique_temp_path(f"auto_ref_{user[id_field]}")
                     cv2.imwrite(temp_ref_path, ref_image)
                     
                     result = DeepFace.verify(
@@ -603,8 +646,9 @@ def auto_face_login():
                         session['name'] = user.get('name')
                         
                         # Cleanup
-                        os.remove(temp_ref_path)
-                        os.remove(temp_auto_path)
+                        for temp_file in [temp_ref_path, temp_auto_path]:
+                            if os.path.exists(temp_file):
+                                os.remove(temp_file)
                         
                         return jsonify({
                             'success': True,
@@ -613,10 +657,9 @@ def auto_face_login():
                             'face_role': face_role
                         })
                     
-                    os.remove(temp_ref_path)
+                    if os.path.exists(temp_ref_path):
+                        os.remove(temp_ref_path)
                 except Exception as e:
-                    if os.path.exists(f"temp_auto_ref_{user[id_field]}.jpg"):
-                        os.remove(f"temp_auto_ref_{user[id_field]}.jpg")
                     continue
             
             if os.path.exists(temp_auto_path):
@@ -986,26 +1029,31 @@ def logout():
 @app.route('/metrics-data', methods=['GET'])
 def metrics_data():
     data = compute_metrics()
-    recent = list(metrics_events.find({}, {"_id": 0}).sort("ts", -1).limit(200))
-    normalized_recent = []
-    for r in recent:
-        if isinstance(r.get("ts"), datetime):
-            r["ts"] = r["ts"].isoformat()
-        event, attempt_type = classify_event(r)
-        if event and not r.get("event"):
-            r["event"] = event
-        if attempt_type and not r.get("attempt_type"):
-            r["attempt_type"] = attempt_type
-        if "liveness_pass" not in r:
-            if r.get("decision") == "spoof_blocked":
-                r["liveness_pass"] = False
-            elif isinstance(r.get("live_prob"), (int, float)):
-                r["liveness_pass"] = bool(r["live_prob"] >= 0.7)
-            else:
-                r["liveness_pass"] = None
-        normalized_recent.append(r)
+    try:
+        recent = list(metrics_events.find({}, {"_id": 0}).sort("ts", -1).limit(200))
+        normalized_recent = []
+        for r in recent:
+            if isinstance(r.get("ts"), datetime):
+                r["ts"] = r["ts"].isoformat()
+            event, attempt_type = classify_event(r)
+            if event and not r.get("event"):
+                r["event"] = event
+            if attempt_type and not r.get("attempt_type"):
+                r["attempt_type"] = attempt_type
+            if "liveness_pass" not in r:
+                if r.get("decision") == "spoof_blocked":
+                    r["liveness_pass"] = False
+                elif isinstance(r.get("live_prob"), (int, float)):
+                    r["liveness_pass"] = bool(r["live_prob"] >= 0.7)
+                else:
+                    r["liveness_pass"] = None
+            normalized_recent.append(r)
 
-    data["recent"] = normalized_recent
+        data["recent"] = normalized_recent
+    except Exception as e:
+        print(f"Error getting recent metrics: {e}")
+        data["recent"] = []
+    
     data["avg_latency_ms"] = compute_latency_avg()
     return jsonify(data)
 
@@ -1048,12 +1096,22 @@ def metrics_json():
 @app.route('/metrics-events')
 def metrics_events_api():
     limit = int(request.args.get("limit", 200))
-    cursor = metrics_events.find({}, {"_id": 0}).sort("ts", -1).limit(limit)
-    events = list(cursor)
-    for ev in events:
-        if isinstance(ev.get("ts"), datetime):
-            ev["ts"] = ev["ts"].isoformat()
-    return jsonify(events)
+    try:
+        cursor = metrics_events.find({}, {"_id": 0}).sort("ts", -1).limit(limit)
+        events = list(cursor)
+        for ev in events:
+            if isinstance(ev.get("ts"), datetime):
+                ev["ts"] = ev["ts"].isoformat()
+        return jsonify(events)
+    except Exception as e:
+        print(f"Error getting metrics events: {e}")
+        return jsonify([])
+
+# Health check endpoint for Render
+@app.route('/health')
+def health_check():
+    return jsonify({'status': 'healthy'}), 200
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
