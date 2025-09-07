@@ -15,6 +15,7 @@ import cv2
 import bz2
 import requests
 from typing import Optional, Dict, Tuple, Any
+import logging
 
 # --- Evaluation Metrics Counters (legacy, kept for compatibility display) ---
 total_attempts = 0
@@ -33,29 +34,63 @@ app = Flask(__name__, static_folder='app/static', template_folder='app/templates
 app.secret_key = os.urandom(24)
 
 # MongoDB Connection
-try:
+def connect_mongodb(max_retries=5, retry_delay=10):
+    """Connect to MongoDB with retry logic"""
     mongo_uri = os.getenv('MONGO_URI', 'mongodb://localhost:27017/')
-    client = MongoClient(mongo_uri)
-    db = client['face_attendance_system']
-    students_collection = db['students']
-    teachers_collection = db['teachers']  # New collection for teachers
-    attendance_collection = db['attendance']
-    metrics_events = db['metrics_events']  # persisted metrics
+    
+    for attempt in range(1, max_retries + 1):
+        try:
+            logging.info(f"MongoDB connection attempt {attempt}")
+            client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000, connectTimeoutMS=5000)
+            # Test the connection
+            client.admin.command('ping')
+            
+            db = client['face_attendance_system']
+            students_collection = db['students']
+            teachers_collection = db['teachers']
+            attendance_collection = db['attendance']
+            metrics_events = db['metrics_events']
 
-    # Indexes
-    students_collection.create_index([("student_id", pymongo.ASCENDING)], unique=True)
-    teachers_collection.create_index([("teacher_id", pymongo.ASCENDING)], unique=True)
-    attendance_collection.create_index([
-        ("student_id", pymongo.ASCENDING),
-        ("date", pymongo.ASCENDING),
-        ("subject", pymongo.ASCENDING)
-    ])
-    metrics_events.create_index([("ts", pymongo.DESCENDING)])
-    metrics_events.create_index([("event", pymongo.ASCENDING)])
-    metrics_events.create_index([("attempt_type", pymongo.ASCENDING)])
-    print("MongoDB connection successful")
-except Exception as e:
-    print(f"MongoDB connection error: {e}")
+            # Create indexes
+            students_collection.create_index([("student_id", pymongo.ASCENDING)], unique=True)
+            teachers_collection.create_index([("teacher_id", pymongo.ASCENDING)], unique=True)
+            attendance_collection.create_index([
+                ("student_id", pymongo.ASCENDING),
+                ("date", pymongo.ASCENDING),
+                ("subject", pymongo.ASCENDING)
+            ])
+            metrics_events.create_index([("ts", pymongo.DESCENDING)])
+            metrics_events.create_index([("event", pymongo.ASCENDING)])
+            metrics_events.create_index([("attempt_type", pymongo.ASCENDING)])
+            
+            logging.info("MongoDB connection successful")
+            return client, db, students_collection, teachers_collection, attendance_collection, metrics_events
+            
+        except Exception as e:
+            logging.error(f"MongoDB connection attempt {attempt} failed: {e}")
+            if attempt < max_retries:
+                time.sleep(retry_delay)
+            else:
+                logging.error("All MongoDB connection attempts failed")
+                return None, None, None, None, None, None
+
+# Initialize MongoDB connection
+client, db, students_collection, teachers_collection, attendance_collection, metrics_events = connect_mongodb()
+
+if client is None:
+    logging.warning("Running without MongoDB connection")
+    # Create mock collections for graceful degradation
+    class MockCollection:
+        def find_one(self, *args, **kwargs): return None
+        def insert_one(self, *args, **kwargs): return type('obj', (object,), {'inserted_id': 'mock'})
+        def update_one(self, *args, **kwargs): return None
+        def create_index(self, *args, **kwargs): return None
+        def find(self, *args, **kwargs): return []
+    
+    students_collection = MockCollection()
+    teachers_collection = MockCollection()
+    attendance_collection = MockCollection()
+    metrics_events = MockCollection()
 
 # ---------------- YOLOv5s-face + AntiSpoof (OpenCV DNN) FOR ATTENDANCE ONLY ----------------
 
@@ -117,16 +152,25 @@ class YoloV5FaceDetector:
         self.input_size = int(input_size)
         self.conf_threshold = float(conf_threshold)
         self.iou_threshold = float(iou_threshold)
+        self.net = None
         
-        self.net = cv2.dnn.readNet(model_path)
-        
-        # Set backend and target for OpenCV DNN
-        if cv2.cuda.getCudaEnabledDeviceCount() > 0:
-            self.net.setPreferableBackend(cv2.dnn.DNN_BACKEND_CUDA)
-            self.net.setPreferableTarget(cv2.dnn.DNN_TARGET_CUDA)
-        else:
-            self.net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
-            self.net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
+        try:
+            if os.path.exists(model_path):
+                self.net = cv2.dnn.readNet(model_path)
+                
+                # Set backend and target for OpenCV DNN
+                if cv2.cuda.getCudaEnabledDeviceCount() > 0:
+                    self.net.setPreferableBackend(cv2.dnn.DNN_BACKEND_CUDA)
+                    self.net.setPreferableTarget(cv2.dnn.DNN_TARGET_CUDA)
+                else:
+                    self.net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
+                    self.net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
+                logging.info(f"YOLOv5 Face model loaded successfully from {model_path}")
+            else:
+                logging.error(f"YOLOv5 Face model file not found: {model_path}")
+        except Exception as e:
+            logging.error(f"Failed to load YOLOv5 Face model: {e}")
+            self.net = None
 
     @staticmethod
     def _xywh2xyxy(x: np.ndarray) -> np.ndarray:
@@ -194,6 +238,90 @@ class YoloV5FaceDetector:
             dets.append({"bbox": boxes_xyxy[i].tolist(), "score": float(scores[i])})
         return dets
 
+    def detect_faces(self, image: np.ndarray) -> list[dict]:
+        if self.net is None:
+            logging.warning("YOLOv5 Face model not available, using fallback detection")
+            return self._fallback_detection(image)
+            
+        h0, w0 = image.shape[:2]
+        img, ratio, dwdh = _letterbox(image, new_shape=(self.input_size, self.input_size))
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        img = img.astype(np.float32) / 255.0
+        
+        blob = cv2.dnn.blobFromImage(img, 1.0, (self.input_size, self.input_size), (0, 0, 0), swapRB=False, crop=False)
+        self.net.setInput(blob)
+        
+        outputs = self.net.forward()
+        preds = outputs[0]
+        
+        if preds.ndim == 3 and preds.shape[0] == 1:
+            preds = preds[0]
+        if preds.ndim != 2:
+            raise RuntimeError(f"Unexpected YOLO output shape: {preds.shape}")
+        
+        num_attrs = preds.shape[1]
+        has_landmarks = num_attrs >= 15
+        boxes_xywh = preds[:, 0:4]
+        
+        if has_landmarks:
+            scores = preds[:, 4]
+        else:
+            obj = preds[:, 4:5]
+            cls_scores = preds[:, 5:]
+            if cls_scores.size == 0:
+                scores = obj.squeeze(-1)
+            else:
+                class_conf = cls_scores.max(axis=1, keepdims=True)
+                scores = (obj * class_conf).squeeze(-1)
+        
+        keep = scores > self.conf_threshold
+        boxes_xywh = boxes_xywh[keep]
+        scores = scores[keep]
+        
+        if boxes_xywh.shape[0] == 0:
+            return []
+        
+        boxes_xyxy = self._xywh2xyxy(boxes_xywh)
+        boxes_xyxy[:, [0, 2]] -= dwdh[0]
+        boxes_xyxy[:, [1, 3]] -= dwdh[1]
+        boxes_xyxy /= ratio
+        boxes_xyxy[:, 0] = np.clip(boxes_xyxy[:, 0], 0, w0 - 1)
+        boxes_xyxy[:, 1] = np.clip(boxes_xyxy[:, 1], 0, h0 - 1)
+        boxes_xyxy[:, 2] = np.clip(boxes_xyxy[:, 2], 0, w0 - 1)
+        boxes_xyxy[:, 3] = np.clip(boxes_xyxy[:, 3], 0, h0 - 1)
+        
+        keep_inds = _nms(boxes_xyxy, scores, self.iou_threshold)
+        if len(keep_inds) > 20:
+            keep_inds = keep_inds[:20]
+        
+        results = []
+        for i in keep_inds:
+            results.append({
+                'bbox': boxes_xyxy[i].tolist(),
+                'confidence': float(scores[i]),
+                'landmarks': []  # No landmarks from YOLOv5-face
+            })
+        return results
+
+    def _fallback_detection(self, image: np.ndarray) -> list[dict]:
+        """Fallback face detection using OpenCV Haar cascades"""
+        try:
+            face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            faces = face_cascade.detectMultiScale(gray, 1.1, 4)
+            
+            results = []
+            for (x, y, w, h) in faces:
+                results.append({
+                    'bbox': [x, y, x + w, y + h],
+                    'confidence': 0.8,  # Default confidence for Haar cascade
+                    'landmarks': []  # No landmarks from Haar cascade
+                })
+            return results
+        except Exception as e:
+            logging.error(f"Fallback detection failed: {e}")
+            return []
+
 
 def _sigmoid(x: np.ndarray) -> np.ndarray:
     return 1.0 / (1.0 + np.exp(-x))
@@ -212,17 +340,26 @@ class AntiSpoofBinary:
         self.normalize = bool(normalize)
         self.mean = np.array(mean, dtype=np.float32).reshape(1, 1, 3)
         self.std = np.array(std, dtype=np.float32).reshape(1, 1, 3)
-        self.live_index = int(live_index)  # index of "live" if model outputs 2 logits [spoof, live]
+        self.live_index = int(live_index)
+        self.net = None
         
-        self.net = cv2.dnn.readNet(model_path)
-        
-        # Set backend and target for OpenCV DNN
-        if cv2.cuda.getCudaEnabledDeviceCount() > 0:
-            self.net.setPreferableBackend(cv2.dnn.DNN_BACKEND_CUDA)
-            self.net.setPreferableTarget(cv2.dnn.DNN_TARGET_CUDA)
-        else:
-            self.net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
-            self.net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
+        try:
+            if os.path.exists(model_path):
+                self.net = cv2.dnn.readNet(model_path)
+                
+                # Set backend and target for OpenCV DNN
+                if cv2.cuda.getCudaEnabledDeviceCount() > 0:
+                    self.net.setPreferableBackend(cv2.dnn.DNN_BACKEND_CUDA)
+                    self.net.setPreferableTarget(cv2.dnn.DNN_TARGET_CUDA)
+                else:
+                    self.net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
+                    self.net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
+                logging.info(f"Anti-spoofing model loaded successfully from {model_path}")
+            else:
+                logging.error(f"Anti-spoofing model file not found: {model_path}")
+        except Exception as e:
+            logging.error(f"Failed to load anti-spoofing model: {e}")
+            self.net = None
 
     def _preprocess(self, face_bgr: np.ndarray) -> np.ndarray:
         img = cv2.resize(face_bgr, (self.input_size, self.input_size), interpolation=cv2.INTER_LINEAR)
@@ -254,6 +391,33 @@ class AntiSpoofBinary:
             live_prob = float(_sigmoid(out.astype(np.float32)))
         
         return max(0.0, min(1.0, live_prob))
+
+    def predict(self, face_bgr: np.ndarray) -> Tuple[float, bool]:
+        if self.net is None:
+            logging.warning("Anti-spoofing model not available, returning default live prediction")
+            return 0.7, True  # Default to live with moderate confidence
+            
+        img = self._preprocess(face_bgr)
+        
+        blob = cv2.dnn.blobFromImage(img, 1.0, (self.input_size, self.input_size), (0, 0, 0), swapRB=False, crop=False)
+        self.net.setInput(blob)
+        
+        outputs = self.net.forward()
+        out = outputs[0]
+        
+        if out.ndim > 1:
+            out = np.squeeze(out, axis=0)
+        
+        if out.size == 2:
+            vec = out.astype(np.float32)
+            probs = np.exp(vec - np.max(vec))
+            probs = probs / (np.sum(probs) + 1e-9)
+            live_prob = float(probs[self.live_index])
+        else:
+            live_prob = float(_sigmoid(out.astype(np.float32)))
+        
+        is_live = live_prob >= 0.7
+        return live_prob, is_live
 
 
 def expand_and_clip_box(bbox_xyxy, scale: float, w: int, h: int):
@@ -289,14 +453,33 @@ def image_to_data_uri(img_bgr: np.ndarray) -> Optional[str]:
     return f"data:image/jpeg;base64,{b64}"
 
 
-# Model paths (ensure these files exist)
-YOLO_FACE_MODEL_PATH = "models/yolov5s-face.onnx"
-ANTI_SPOOF_BIN_MODEL_PATH = "models/anti_spoofing/AntiSpoofing_bin_1.5_128.onnx"
+def initialize_models():
+    """Initialize models with proper error handling"""
+    global yolo_face, anti_spoof_bin
+    
+    try:
+        # Model paths
+        yolo_model_path = "models/yolov5s-face.onnx"
+        anti_spoof_model_path = "models/anti_spoofing/AntiSpoofing_bin_1.5_128.onnx"
+        
+        # Create models directory if it doesn't exist
+        os.makedirs("models", exist_ok=True)
+        os.makedirs("models/anti_spoofing", exist_ok=True)
+        
+        # Initialize models
+        yolo_face = YoloV5FaceDetector(yolo_model_path, input_size=640, conf_threshold=0.3, iou_threshold=0.45)
+        anti_spoof_bin = AntiSpoofBinary(anti_spoof_model_path, input_size=128, rgb=True, normalize=True, live_index=1)
+        
+        logging.info("Models initialized successfully")
+        
+    except Exception as e:
+        logging.error(f"Error initializing models: {e}")
+        # Create fallback models
+        yolo_face = YoloV5FaceDetector("", input_size=640, conf_threshold=0.3, iou_threshold=0.45)
+        anti_spoof_bin = AntiSpoofBinary("", input_size=128, rgb=True, normalize=True, live_index=1)
 
-# Initialize models (attendance only)
-yolo_face = YoloV5FaceDetector(YOLO_FACE_MODEL_PATH, input_size=640, conf_threshold=0.3, iou_threshold=0.45)
-# If your binary model's two logits are [live, spoof] instead of [spoof, live], set live_index=0
-anti_spoof_bin = AntiSpoofBinary(ANTI_SPOOF_BIN_MODEL_PATH, input_size=128, rgb=True, normalize=True, live_index=1)
+# Initialize models
+initialize_models()
 
 # ------------------------------------------------------------------------------------------------
 # ----------------------------- Dlib-based Recognition Pipeline (unchanged) -----------------------------
@@ -1200,4 +1383,9 @@ def metrics_events_api():
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), debug=False)
+    port = int(os.environ.get('PORT', 5000))
+    debug_mode = os.environ.get('FLASK_ENV', 'production') != 'production'
+    
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    logging.info(f"Starting Flask app on port {port}, debug={debug_mode}")
+    app.run(host='0.0.0.0', port=port, debug=debug_mode)
