@@ -72,37 +72,24 @@ try:
 except Exception as e:
     print(f"MongoDB connection error: {e}")
 
-# ---------------- Lightweight Model Implementations ----------------
+# ---------------- Reliable Face Detection Implementation ----------------
 
-# Initialize YuNet Face Detector with proper model download and fallback
+# Initialize Haar Cascade Face Detector (most reliable for cloud deployment)
 face_detector = None
-face_detector_type = None  # Track detector type for proper usage
-
 try:
-    model_path = "face_detection_yunet_2023mar.onnx"
-    if not os.path.exists(model_path):
-        import urllib.request
-        url = "https://github.com/opencv/opencv_zoo/raw/master/models/face_detection_yunet/face_detection_yunet_2023mar.onnx"
-        print(f"Downloading YuNet model from {url}...")
-        urllib.request.urlretrieve(url, model_path)
-        print("Downloaded YuNet model successfully")
-
-    face_detector = cv2.FaceDetectorYN.create(
-        model=model_path,
-        config="",
-        input_size=(640, 480)
-    )
-    face_detector_type = "yunet"
-    print("YuNet face detector initialized successfully")
+    face_detector = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+    print("Haar cascade face detector initialized successfully")
 except Exception as e:
-    print(f"Error initializing YuNet: {e}")
-    # Fallback to Haar cascade
-    try:
-        face_detector = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-        face_detector_type = "haar"
-        print("Fallback to Haar cascade face detector")
-    except Exception as e2:
-        print(f"Error initializing Haar cascade: {e2}")
+    print(f"Error initializing face detector: {e}")
+
+# Initialize MediaPipe Face Detection (backup option)
+mp_face_detection = None
+try:
+    import mediapipe as mp
+    mp_face_detection = mp.solutions.face_detection
+    print("MediaPipe face detection available")
+except Exception as e:
+    print(f"MediaPipe face detection not available: {e}")
 
 # Initialize MediaPipe Face Mesh
 face_mesh = None
@@ -132,67 +119,87 @@ def get_unique_temp_path(prefix="temp", suffix=".jpg"):
     filename = f"{prefix}_{unique_id}_{int(time.time())}{suffix}"
     return os.path.join(TEMP_DIR, filename)
 
-def detect_faces_yunet(image):
-    """Detect faces using YuNet or fallback to Haar cascade"""
-    if face_detector is None:
+def detect_faces_haar(image):
+    """Detect faces using Haar cascade - most reliable method"""
+    try:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        faces = face_detector.detectMultiScale(
+            gray,
+            scaleFactor=1.1,
+            minNeighbors=5,
+            minSize=(30, 30)
+        )
+        
+        detections = []
+        for (x, y, w, h) in faces:
+            detections.append({
+                "bbox": [x, y, x + w, y + h],
+                "score": 0.9
+            })
+        return detections
+    except Exception as e:
+        print(f"Error in Haar cascade detection: {e}")
         return []
 
+def detect_faces_mediapipe(image):
+    """Detect faces using MediaPipe as backup"""
+    if mp_face_detection is None:
+        return []
+    
     try:
-        height, width = image.shape[:2]
-
-        # Use YuNet detector
-        if face_detector_type == "yunet":
-            face_detector.setInputSize((width, height))
-            _, faces = face_detector.detect(image)
-            if faces is None:
-                return []
-
-            detections = []
-            for face in faces:
-                x1, y1, w, h = face[:4].astype(int)
-                x2, y2 = x1 + w, y1 + h
-                confidence = face[14] if len(face) > 14 else 0.9
-                
-                detections.append({
-                    "bbox": [x1, y1, x2, y2],
-                    "score": float(confidence)
-                })
-            return detections
-
-        # Use Haar cascade detector
-        elif face_detector_type == "haar":
-            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-            faces = face_detector.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5)
+        with mp_face_detection.FaceDetection(model_selection=0, min_detection_confidence=0.5) as face_detection:
+            rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            results = face_detection.process(rgb_image)
             
             detections = []
-            for (x, y, w, h) in faces:
-                detections.append({
-                    "bbox": [x, y, x + w, y + h],
-                    "score": 0.9  # Default confidence for Haar
-                })
+            if results.detections:
+                h, w = image.shape[:2]
+                for detection in results.detections:
+                    bbox = detection.location_data.relative_bounding_box
+                    x1 = int(bbox.xmin * w)
+                    y1 = int(bbox.ymin * h)
+                    x2 = int((bbox.xmin + bbox.width) * w)
+                    y2 = int((bbox.ymin + bbox.height) * h)
+                    
+                    detections.append({
+                        "bbox": [x1, y1, x2, y2],
+                        "score": detection.score[0]
+                    })
             return detections
-
-        else:
-            return []
-
     except Exception as e:
-        print(f"Error in face detection: {e}")
-        # Final fallback to simple Haar cascade
-        try:
-            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-            haar_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-            faces = haar_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5)
-            
-            detections = []
-            for (x, y, w, h) in faces:
-                detections.append({
-                    "bbox": [x, y, x + w, y + h],
-                    "score": 0.9
-                })
+        print(f"Error in MediaPipe detection: {e}")
+        return []
+
+def detect_faces_yunet(image):
+    """Unified face detection function with reliable methods"""
+    # Try Haar cascade first (most reliable)
+    if face_detector is not None:
+        detections = detect_faces_haar(image)
+        if detections:
             return detections
-        except Exception as e2:
-            print(f"Error in fallback Haar cascade detection: {e2}")
-            return []
+    
+    # Fallback to MediaPipe if available
+    detections = detect_faces_mediapipe(image)
+    if detections:
+        return detections
+    
+    # Final fallback - simple contour detection
+    try:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        # Use built-in face cascade as last resort
+        face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+        faces = face_cascade.detectMultiScale(gray, 1.3, 5)
+        
+        detections = []
+        for (x, y, w, h) in faces:
+            detections.append({
+                "bbox": [x, y, x + w, y + h],
+                "score": 0.8
+            })
+        return detections
+    except Exception as e:
+        print(f"Error in final fallback detection: {e}")
+        return []
 
 def recognize_face_deepface(image, user_id, user_type='student'):
     """Face recognition using DeepFace (lightweight alternative) - optimized for Render"""
@@ -771,7 +778,7 @@ def mark_attendance():
     h, w = image.shape[:2]
     vis = image.copy()
 
-    # 1) YuNet face detection (lightweight)
+    # 1) Face detection using reliable methods
     detections = detect_faces_yunet(image)
     if not detections:
         overlay = image_to_data_uri(vis)
