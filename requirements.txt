@@ -1,7 +1,7 @@
 Flask==2.3.3
 opencv-python-headless==4.8.1.78
 deepface==0.0.79
-mediapipe==0.10.3
+mediapipe==0.10.11
 numpy==1.24.3
 Pillow==10.0.0
 python-dotenv==1.0.0
